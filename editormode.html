@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layer Dive</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: #000;
+    font-family: 'Courier New', monospace;
+  }
+
+  #bg {
+    position: fixed;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+  }
+
+  #bg::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.25);
+    pointer-events: none;
+  }
+
+  #top-img {
+    position: fixed;
+    object-fit: cover;
+    will-change: top, left, width, height;
+    box-shadow: 0 25px 80px rgba(0,0,0,0.7);
+  }
+
+  /* 일반 모드: 클릭 커서 */
+  body:not(.editor) #top-img {
+    cursor: pointer;
+  }
+  body:not(.editor) #top-img:hover {
+    box-shadow: 0 35px 100px rgba(0,0,0,0.85);
+  }
+
+  /* 에디터 모드: 이동 커서 */
+  body.editor #top-img {
+    cursor: move;
+    outline: 2px dashed rgba(255,255,100,0.8);
+    outline-offset: 2px;
+  }
+
+  /* ── 리사이즈 핸들 (모서리 4개) ── */
+  .resize-handle {
+    position: fixed;
+    width: 14px; height: 14px;
+    background: #fff;
+    border: 2px solid #000;
+    border-radius: 2px;
+    z-index: 1000;
+    display: none;
+  }
+  body.editor .resize-handle { display: block; }
+
+  #handle-nw { cursor: nw-resize; }
+  #handle-ne { cursor: ne-resize; }
+  #handle-sw { cursor: sw-resize; }
+  #handle-se { cursor: se-resize; }
+
+  /* ── 에디터 패널 ── */
+  #editor-panel {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.85);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 8px;
+    padding: 16px 20px;
+    z-index: 2000;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 340px;
+    backdrop-filter: blur(10px);
+    color: #fff;
+    font-size: 12px;
+  }
+  body.editor #editor-panel { display: flex; }
+
+  #editor-panel .panel-title {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: rgba(255,255,100,0.9);
+    text-transform: uppercase;
+    margin-bottom: 2px;
+  }
+
+  #editor-panel .values {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 8px;
+  }
+
+  #editor-panel .val-box {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  #editor-panel .val-label {
+    font-size: 9px;
+    color: rgba(255,255,255,0.4);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  #editor-panel .val-num {
+    font-size: 15px;
+    font-weight: bold;
+    color: #ffe;
+    letter-spacing: 0.05em;
+  }
+
+  #editor-panel .code-box {
+    background: rgba(255,255,255,0.06);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 11px;
+    color: rgba(255,255,200,0.85);
+    line-height: 1.7;
+    white-space: pre;
+  }
+
+  #copy-btn {
+    align-self: flex-end;
+    background: rgba(255,255,100,0.15);
+    border: 1px solid rgba(255,255,100,0.4);
+    color: rgba(255,255,100,0.9);
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  #copy-btn:hover { background: rgba(255,255,100,0.28); }
+  #copy-btn.copied { color: #0f0; border-color: #0f0; }
+
+  /* ── 에디터 토글 버튼 ── */
+  #editor-toggle {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 3000;
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.6);
+    font-family: 'Courier New', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    padding: 7px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+  }
+  #editor-toggle:hover { background: rgba(255,255,255,0.1); color: #fff; }
+  body.editor #editor-toggle {
+    background: rgba(255,255,100,0.15);
+    border-color: rgba(255,255,100,0.5);
+    color: rgba(255,255,100,0.9);
+  }
+
+  /* ── 레이어 네비 (에디터용) ── */
+  #layer-nav {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 3000;
+    display: none;
+    gap: 8px;
+    align-items: center;
+  }
+  body.editor #layer-nav { display: flex; }
+
+  #layer-nav button {
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.7);
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    transition: background 0.2s;
+  }
+  #layer-nav button:hover { background: rgba(255,255,255,0.12); }
+
+  #layer-nav span {
+    color: rgba(255,255,255,0.5);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    min-width: 80px;
+    text-align: center;
+  }
+
+  /* ── 일반 UI ── */
+  #hint {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.4);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    z-index: 100;
+    transition: opacity 0.5s;
+    pointer-events: none;
+  }
+  body.editor #hint { display: none; }
+
+  #back {
+    position: fixed;
+    top: 24px; left: 24px;
+    color: rgba(255,255,255,0.5);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    z-index: 100;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.3s, color 0.2s;
+    user-select: none;
+  }
+  #back:hover { color: rgba(255,255,255,0.9); }
+  #back.show { opacity: 1; }
+  body.editor #back { display: none; }
+</style>
+</head>
+<body>
+
+<div id="bg"></div>
+<img id="top-img" src="" alt="" />
+
+<!-- 리사이즈 핸들 -->
+<div class="resize-handle" id="handle-nw"></div>
+<div class="resize-handle" id="handle-ne"></div>
+<div class="resize-handle" id="handle-sw"></div>
+<div class="resize-handle" id="handle-se"></div>
+
+<!-- 에디터 패널 -->
+<div id="editor-panel">
+  <div class="panel-title">✦ Editor Mode — 드래그로 위치/크기 조정</div>
+  <div class="values">
+    <div class="val-box"><div class="val-label">x</div><div class="val-num" id="val-x">0.00</div></div>
+    <div class="val-box"><div class="val-label">y</div><div class="val-num" id="val-y">0.00</div></div>
+    <div class="val-box"><div class="val-label">w</div><div class="val-num" id="val-w">0.00</div></div>
+    <div class="val-box"><div class="val-label">h</div><div class="val-num" id="val-h">0.00</div></div>
+  </div>
+  <div class="code-box" id="code-preview"></div>
+  <button id="copy-btn" onclick="copyValues()">복사</button>
+</div>
+
+<!-- 에디터 토글 -->
+<button id="editor-toggle" onclick="toggleEditor()">EDITOR OFF</button>
+
+<!-- 레이어 네비 (에디터 전용) -->
+<div id="layer-nav">
+  <button onclick="editorPrevLayer()">← prev</button>
+  <span id="layer-label">LAYER 1 / 9</span>
+  <button onclick="editorNextLayer()">next →</button>
+</div>
+
+<div id="hint">이미지를 클릭하여 들어가기</div>
+<div id="back" onclick="goBack()">← back</div>
+
+<script>
+
+// ═══════════════════════════════════════════════════
+//  ★ 여기만 수정하세요 ★
+// ═══════════════════════════════════════════════════
+
+const LAYERS = [
+  {
+    bg:  'window_1.png',
+    img: 'window_2.png',
+    x: 0.30, y: 0.20, w: 0.40, h: 0.55,
+  },
+  {
+    bg:  'window_2.png',
+    img: 'window_3.png',
+    x: 0.10, y: 0.30, w: 0.35, h: 0.45,
+  },
+  {
+    bg:  'window_3.png',
+    img: 'window_4.png',
+    x: 0.50, y: 0.15, w: 0.38, h: 0.50,
+  },
+  {
+    bg:  'window_4.png',
+    img: 'window_5.png',
+    x: 0.20, y: 0.25, w: 0.45, h: 0.55,
+  },
+  {
+    bg:  'window_5.png',
+    img: 'window_6.png',
+    x: 0.35, y: 0.10, w: 0.40, h: 0.60,
+  },
+  {
+    bg:  'window_6.png',
+    img: 'window_7.png',
+    x: 0.15, y: 0.20, w: 0.42, h: 0.50,
+  },
+  {
+    bg:  'window_7.png',
+    img: 'window_8.png',
+    x: 0.45, y: 0.25, w: 0.38, h: 0.48,
+  },
+  {
+    bg:  'window_8.png',
+    img: 'window_9.png',
+    x: 0.25, y: 0.15, w: 0.44, h: 0.55,
+  },
+  {
+    bg:  'window_9.png',
+    img: 'window_10.png',
+    x: 0.30, y: 0.30, w: 0.40, h: 0.45,
+  },
+];
+
+// ═══════════════════════════════════════════════════
+//  로직
+// ═══════════════════════════════════════════════════
+
+let stack = [];
+let currentLayerIndex = 0;
+let isAnimating = false;
+let isEditorMode = false;
+let editorLayerIndex = 0;
+
+// 에디터용 현재 rect (픽셀)
+let editRect = { x: 0, y: 0, w: 0, h: 0 };
+
+const bg       = document.getElementById('bg');
+const topImg   = document.getElementById('top-img');
+const hint     = document.getElementById('hint');
+const backEl   = document.getElementById('back');
+
+const valX = document.getElementById('val-x');
+const valY = document.getElementById('val-y');
+const valW = document.getElementById('val-w');
+const valH = document.getElementById('val-h');
+const codePreview = document.getElementById('code-preview');
+const layerLabel  = document.getElementById('layer-label');
+
+const handles = {
+  nw: document.getElementById('handle-nw'),
+  ne: document.getElementById('handle-ne'),
+  sw: document.getElementById('handle-sw'),
+  se: document.getElementById('handle-se'),
+};
+
+// ── 비율 → 픽셀 ──
+function getRect(layer) {
+  const W = window.innerWidth, H = window.innerHeight;
+  return { x: W * layer.x, y: H * layer.y, w: W * layer.w, h: H * layer.h };
+}
+
+// ── 픽셀 → 비율 ──
+function toRatio(rect) {
+  const W = window.innerWidth, H = window.innerHeight;
+  return {
+    x: rect.x / W, y: rect.y / H,
+    w: rect.w / W, h: rect.h / H,
+  };
+}
+
+// ── 이미지 배치 ──
+function placeImage(url, rect) {
+  topImg.style.transition = 'none';
+  topImg.style.opacity = '0';
+  topImg.src = url;
+  applyRect(rect);
+}
+
+function applyRect(rect) {
+  topImg.style.left   = rect.x + 'px';
+  topImg.style.top    = rect.y + 'px';
+  topImg.style.width  = rect.w + 'px';
+  topImg.style.height = rect.h + 'px';
+  updateHandles(rect);
+}
+
+// ── 핸들 위치 갱신 ──
+function updateHandles(rect) {
+  const hs = 14;
+  const half = hs / 2;
+  handles.nw.style.left = (rect.x - half) + 'px';
+  handles.nw.style.top  = (rect.y - half) + 'px';
+  handles.ne.style.left = (rect.x + rect.w - half) + 'px';
+  handles.ne.style.top  = (rect.y - half) + 'px';
+  handles.sw.style.left = (rect.x - half) + 'px';
+  handles.sw.style.top  = (rect.y + rect.h - half) + 'px';
+  handles.se.style.left = (rect.x + rect.w - half) + 'px';
+  handles.se.style.top  = (rect.y + rect.h - half) + 'px';
+}
+
+// ── 에디터 패널 값 갱신 ──
+function updatePanel() {
+  const r = toRatio(editRect);
+  const layer = LAYERS[editorLayerIndex];
+  valX.textContent = r.x.toFixed(3);
+  valY.textContent = r.y.toFixed(3);
+  valW.textContent = r.w.toFixed(3);
+  valH.textContent = r.h.toFixed(3);
+  codePreview.textContent =
+    `bg:  '${layer.bg}',\nimg: '${layer.img}',\nx: ${r.x.toFixed(3)}, y: ${r.y.toFixed(3)},\nw: ${r.w.toFixed(3)}, h: ${r.h.toFixed(3)},`;
+}
+
+// ── 복사 ──
+function copyValues() {
+  const r = toRatio(editRect);
+  const layer = LAYERS[editorLayerIndex];
+  const text = `  {\n    bg:  '${layer.bg}',\n    img: '${layer.img}',\n    x: ${r.x.toFixed(3)}, y: ${r.y.toFixed(3)}, w: ${r.w.toFixed(3)}, h: ${r.h.toFixed(3)},\n  },`;
+  navigator.clipboard.writeText(text);
+  const btn = document.getElementById('copy-btn');
+  btn.textContent = '복사됨 ✓';
+  btn.classList.add('copied');
+  setTimeout(() => { btn.textContent = '복사'; btn.classList.remove('copied'); }, 1500);
+}
+
+// ── 에디터 모드 토글 ──
+function toggleEditor() {
+  isEditorMode = !isEditorMode;
+  document.body.classList.toggle('editor', isEditorMode);
+  document.getElementById('editor-toggle').textContent = isEditorMode ? 'EDITOR ON' : 'EDITOR OFF';
+
+  if (isEditorMode) {
+    editorLayerIndex = currentLayerIndex;
+    loadEditorLayer(editorLayerIndex);
+  } else {
+    // 에디터 종료 → 현재 레이어 비율값 LAYERS에 반영
+    const r = toRatio(editRect);
+    LAYERS[editorLayerIndex].x = r.x;
+    LAYERS[editorLayerIndex].y = r.y;
+    LAYERS[editorLayerIndex].w = r.w;
+    LAYERS[editorLayerIndex].h = r.h;
+    // 일반 모드로 복귀
+    topImg.style.transition = 'none';
+    topImg.style.opacity = '1';
+  }
+}
+
+// ── 에디터: 레이어 로드 ──
+function loadEditorLayer(idx) {
+  const layer = LAYERS[idx];
+  bg.style.backgroundImage = `url('${layer.bg}')`;
+  editRect = getRect(layer);
+  topImg.src = layer.img;
+  topImg.style.transition = 'none';
+  topImg.style.opacity = '1';
+  applyRect(editRect);
+  updatePanel();
+  layerLabel.textContent = `LAYER ${idx + 1} / ${LAYERS.length}`;
+}
+
+function editorPrevLayer() {
+  if (editorLayerIndex <= 0) return;
+  // 현재 레이어 저장
+  const r = toRatio(editRect);
+  LAYERS[editorLayerIndex].x = r.x; LAYERS[editorLayerIndex].y = r.y;
+  LAYERS[editorLayerIndex].w = r.w; LAYERS[editorLayerIndex].h = r.h;
+  editorLayerIndex--;
+  loadEditorLayer(editorLayerIndex);
+}
+
+function editorNextLayer() {
+  if (editorLayerIndex >= LAYERS.length - 1) return;
+  const r = toRatio(editRect);
+  LAYERS[editorLayerIndex].x = r.x; LAYERS[editorLayerIndex].y = r.y;
+  LAYERS[editorLayerIndex].w = r.w; LAYERS[editorLayerIndex].h = r.h;
+  editorLayerIndex++;
+  loadEditorLayer(editorLayerIndex);
+}
+
+// ══════════════════════════════════════
+//  드래그 (이미지 이동)
+// ══════════════════════════════════════
+let dragging = false;
+let dragStartX, dragStartY, dragOrigX, dragOrigY;
+
+topImg.addEventListener('mousedown', (e) => {
+  if (!isEditorMode) return;
+  dragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  dragOrigX  = editRect.x;
+  dragOrigY  = editRect.y;
+  e.preventDefault();
+});
+
+// ══════════════════════════════════════
+//  리사이즈 핸들 드래그
+// ══════════════════════════════════════
+let resizing = false;
+let resizeDir = '';
+let resizeStartX, resizeStartY;
+let resizeOrigRect;
+
+Object.entries(handles).forEach(([dir, el]) => {
+  el.addEventListener('mousedown', (e) => {
+    resizing = true;
+    resizeDir = dir;
+    resizeStartX = e.clientX;
+    resizeStartY = e.clientY;
+    resizeOrigRect = { ...editRect };
+    e.preventDefault();
+    e.stopPropagation();
+  });
+});
+
+// ── 전역 mousemove ──
+document.addEventListener('mousemove', (e) => {
+  if (!isEditorMode) return;
+
+  if (dragging) {
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    editRect.x = dragOrigX + dx;
+    editRect.y = dragOrigY + dy;
+    applyRect(editRect);
+    updatePanel();
+  }
+
+  if (resizing) {
+    const dx = e.clientX - resizeStartX;
+    const dy = e.clientY - resizeStartY;
+    const minSize = 40;
+    let { x, y, w, h } = resizeOrigRect;
+
+    if (resizeDir === 'se') {
+      w = Math.max(minSize, w + dx);
+      h = Math.max(minSize, h + dy);
+    } else if (resizeDir === 'sw') {
+      const newW = Math.max(minSize, w - dx);
+      x = x + w - newW;
+      w = newW;
+      h = Math.max(minSize, h + dy);
+    } else if (resizeDir === 'ne') {
+      w = Math.max(minSize, w + dx);
+      const newH = Math.max(minSize, h - dy);
+      y = y + h - newH;
+      h = newH;
+    } else if (resizeDir === 'nw') {
+      const newW = Math.max(minSize, w - dx);
+      const newH = Math.max(minSize, h - dy);
+      x = x + w - newW;
+      y = y + h - newH;
+      w = newW;
+      h = newH;
+    }
+
+    editRect = { x, y, w, h };
+    applyRect(editRect);
+    updatePanel();
+  }
+});
+
+document.addEventListener('mouseup', () => {
+  dragging = false;
+  resizing = false;
+});
+
+// ══════════════════════════════════════
+//  일반 모드 클릭: 다음 레이어
+// ══════════════════════════════════════
+topImg.addEventListener('click', () => {
+  if (isEditorMode || isAnimating) return;
+  if (currentLayerIndex >= LAYERS.length - 1) return;
+  isAnimating = true;
+  hint.style.opacity = '0';
+
+  const imgRect = topImg.getBoundingClientRect();
+  stack.push({
+    layerIndex: currentLayerIndex,
+    rect: { x: imgRect.left, y: imgRect.top, w: imgRect.width, h: imgRect.height }
+  });
+
+  const tr = 'cubic-bezier(0.16,1,0.3,1)';
+  topImg.style.transition = `left 0.65s ${tr}, top 0.65s ${tr}, width 0.65s ${tr}, height 0.65s ${tr}`;
+  topImg.style.left   = '0'; topImg.style.top    = '0';
+  topImg.style.width  = window.innerWidth + 'px';
+  topImg.style.height = window.innerHeight + 'px';
+
+  setTimeout(() => {
+    currentLayerIndex++;
+    const nextLayer = LAYERS[currentLayerIndex];
+    bg.style.backgroundImage = `url('${nextLayer.bg}')`;
+    topImg.style.opacity = '0';
+
+    setTimeout(() => {
+      placeImage(nextLayer.img, getRect(nextLayer));
+      requestAnimationFrame(() => {
+        topImg.style.transition = 'opacity 0.5s ease, box-shadow 0.3s ease';
+        topImg.style.opacity = '1';
+      });
+      updateNormalUI();
+      setTimeout(() => { isAnimating = false; }, 400);
+    }, 200);
+  }, 680);
+});
+
+// 뒤로가기
+function goBack() {
+  if (isAnimating || stack.length === 0) return;
+  isAnimating = true;
+
+  const prev = stack.pop();
+  currentLayerIndex = prev.layerIndex;
+  const layer = LAYERS[currentLayerIndex];
+
+  topImg.style.transition = 'opacity 0.3s ease';
+  topImg.style.opacity = '0';
+
+  setTimeout(() => {
+    bg.style.backgroundImage = `url('${layer.bg}')`;
+    topImg.src = layer.img;
+    topImg.style.transition = 'none';
+    topImg.style.left = '0'; topImg.style.top = '0';
+    topImg.style.width = window.innerWidth + 'px';
+    topImg.style.height = window.innerHeight + 'px';
+    topImg.style.opacity = '0.8';
+
+    requestAnimationFrame(() => {
+      const tr = 'cubic-bezier(0.16,1,0.3,1)';
+      topImg.style.transition = `left 0.6s ${tr}, top 0.6s ${tr}, width 0.6s ${tr}, height 0.6s ${tr}, opacity 0.4s ease`;
+      topImg.style.left   = prev.rect.x + 'px';
+      topImg.style.top    = prev.rect.y + 'px';
+      topImg.style.width  = prev.rect.w + 'px';
+      topImg.style.height = prev.rect.h + 'px';
+      topImg.style.opacity = '1';
+    });
+    updateNormalUI();
+    setTimeout(() => { isAnimating = false; }, 650);
+  }, 300);
+}
+
+function updateNormalUI() {
+  backEl.classList.toggle('show', stack.length > 0);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' || e.key === 'Backspace') {
+    if (!isEditorMode) goBack();
+  }
+  if (e.key === 'e' || e.key === 'E') toggleEditor();
+});
+
+// ── 초기화 ──
+function init() {
+  currentLayerIndex = 0;
+  const layer = LAYERS[0];
+  bg.style.backgroundImage = `url('${layer.bg}')`;
+  placeImage(layer.img, getRect(layer));
+  setTimeout(() => {
+    topImg.style.transition = 'opacity 0.6s ease, box-shadow 0.3s ease';
+    topImg.style.opacity = '1';
+  }, 100);
+}
+
+init();
+</script>
+</body>
+</html>

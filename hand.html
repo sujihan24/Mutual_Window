@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MINESWEEPER HAND</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=VT323&family=Press+Start+2P&display=swap');
+  @font-face {
+    font-family: 'Frutiger';
+    src: local('Frutiger'), local('Frutiger LT Std'), local('FrutigerLTStd-Roman');
+    font-weight: normal;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; width: 100vw; height: 100vh; font-family: 'VT323', monospace; cursor: crosshair; background: #000; }
+
+  #bg-canvas {
+    position: fixed; inset: 0; z-index: 0;
+    width: 100%; height: 100%;
+  }
+
+  #hand-canvas {
+    position: fixed; inset: 0; z-index: 10; pointer-events: none;
+  }
+
+  #webcam {
+    position: fixed; width: 1px; height: 1px;
+    opacity: 0; pointer-events: none; z-index: -1;
+  }
+
+  #pixel-overlay {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: 0.03;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(0,0,0,0.5) 0px, transparent 1px, transparent 12px, rgba(0,0,0,0.5) 12px),
+      repeating-linear-gradient(90deg, rgba(0,0,0,0.5) 0px, transparent 1px, transparent 12px, rgba(0,0,0,0.5) 12px);
+  }
+
+  #title-overlay {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 50; text-align: center; pointer-events: none;
+  }
+  #title-overlay h1 {
+    font-family: 'Press Start 2P', monospace; font-size: clamp(10px, 2vw, 18px);
+    color: white; text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 3px 3px 8px rgba(0,0,0,0.5);
+    letter-spacing: 2px; white-space: nowrap;
+  }
+
+  /* ── 백버튼 ── */
+  #back-btn {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 100;
+    width: 56px;
+    height: 56px;
+    cursor: pointer;
+    text-decoration: none;
+    opacity: 0.85;
+    transition: opacity 0.2s, transform 0.2s;
+  }
+  #back-btn:hover {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  #back-btn img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+
+  /* ── 손바닥 안내 화면 ── */
+  #intro-screen {
+    position: fixed; inset: 0; z-index: 200;
+    background: #87CEEB;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 32px;
+    transition: opacity 0.8s ease;
+  }
+  #intro-screen.fade-out {
+    opacity: 0; pointer-events: none;
+  }
+
+  #hand-intro-canvas {
+    display: block;
+  }
+
+  #intro-text {
+    font-family: 'Frutiger', 'Frutiger LT Std', 'Myriad Pro', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    font-size: clamp(13px, 1.6vw, 18px);
+    font-weight: 400;
+    color: rgba(255,255,255,0.85);
+    letter-spacing: 0.22em;
+    text-align: center;
+    line-height: 2.0;
+    text-transform: uppercase;
+    text-shadow: 0 0 18px rgba(255,255,255,0.35);
+    animation: textBlink 1.4s ease-in-out infinite;
+  }
+
+  @keyframes textBlink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.3; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 백버튼 -->
+<a id="back-btn" href="iconlayout.html" title="Back">
+  <img src="backbutton.png" alt="Back">
+</a>
+
+<!-- 손바닥 안내 화면 -->
+<div id="intro-screen">
+  <canvas id="hand-intro-canvas"></canvas>
+  <div id="intro-text">SHOW BOTH HANDS<br>TO THE CAMERA</div>
+</div>
+
+<canvas id="bg-canvas"></canvas>
+<div id="pixel-overlay"></div>
+<canvas id="hand-canvas"></canvas>
+<video id="webcam" autoplay muted playsinline></video>
+
+<div id="title-overlay"><h1>MINESWEEPER HAND TRACKER</h1></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  손바닥 안내 화면 — 파티클 손 실루엣
+// ═══════════════════════════════════════════════════════
+(function() {
+  const introCanvas = document.getElementById('hand-intro-canvas');
+  const ic = introCanvas.getContext('2d');
+
+  const PH = Math.min(window.innerHeight * 0.55, 360);
+  const PW = PH * 2.8;
+  introCanvas.width  = PW;
+  introCanvas.height = PH;
+
+  function buildHandMask(W, H) {
+    const mc = document.createElement('canvas');
+    mc.width = W; mc.height = H;
+    const mx = mc.getContext('2d');
+    mx.fillStyle = '#fff';
+
+    const cx = W * 0.50, cy = H * 0.70;
+    const u  = H * 0.068;
+
+    mx.beginPath();
+    mx.ellipse(cx - u*0.1, cy, u*2.5, u*2.0, -0.06, 0, Math.PI*2);
+    mx.fill();
+
+    mx.beginPath();
+    mx.ellipse(cx - u*0.1, cy + u*2.3, u*1.7, u*1.0, 0, 0, Math.PI*2);
+    mx.fill();
+
+    mx.save();
+    mx.translate(cx + u*2.2, cy - u*0.5);
+    mx.rotate(0.88);
+    mx.beginPath();
+    mx.ellipse(0, 0, u*0.82, u*2.2, 0, 0, Math.PI*2);
+    mx.fill();
+    mx.restore();
+
+    mx.save();
+    mx.translate(cx + u*1.55, cy - u*2.9);
+    mx.rotate(0.16);
+    mx.beginPath();
+    mx.ellipse(0, 0, u*0.72, u*3.1, 0, 0, Math.PI*2);
+    mx.fill();
+    mx.restore();
+
+    mx.save();
+    mx.translate(cx + u*0.32, cy - u*3.2);
+    mx.rotate(0.03);
+    mx.beginPath();
+    mx.ellipse(0, 0, u*0.75, u*3.4, 0, 0, Math.PI*2);
+    mx.fill();
+    mx.restore();
+
+    mx.save();
+    mx.translate(cx - u*0.90, cy - u*3.0);
+    mx.rotate(-0.10);
+    mx.beginPath();
+    mx.ellipse(0, 0, u*0.70, u*3.15, 0, 0, Math.PI*2);
+    mx.fill();
+    mx.restore();
+
+    mx.save();
+    mx.translate(cx - u*2.05, cy - u*2.2);
+    mx.rotate(-0.27);
+    mx.beginPath();
+    mx.ellipse(0, 0, u*0.60, u*2.4, 0, 0, Math.PI*2);
+    mx.fill();
+    mx.restore();
+
+    return mc;
+  }
+
+  function sampleEdgeParticles(mask, count) {
+    const mw = mask.width, mh = mask.height;
+    const d  = mask.getContext('2d').getImageData(0, 0, mw, mh).data;
+    const edge = [];
+
+    for (let y = 1; y < mh - 1; y++) {
+      for (let x = 1; x < mw - 1; x++) {
+        const i = (y * mw + x) * 4;
+        if (d[i] < 128) continue;
+        const n = d[((y-1)*mw+x)*4];
+        const s = d[((y+1)*mw+x)*4];
+        const l = d[(y*mw+x-1)*4];
+        const r = d[(y*mw+x+1)*4];
+        if (n < 128 || s < 128 || l < 128 || r < 128) {
+          edge.push([x / mw, y / mh]);
+        }
+      }
+    }
+
+    const step = Math.max(1, Math.floor(edge.length / count));
+    const pts  = [];
+    for (let i = 0; i < edge.length; i += step) pts.push(edge[i]);
+    return pts;
+  }
+
+  class Particle {
+    constructor(nx, ny, canvasW, canvasH) {
+      this.tx = nx * canvasW;
+      this.ty = ny * canvasH;
+      this.x  = Math.random() * canvasW;
+      this.y  = Math.random() * canvasH;
+      this.vx = 0; this.vy = 0;
+      this.r  = Math.random() * 1.4 + 0.6;
+      this.phase = Math.random() * Math.PI * 2;
+    }
+    update(t) {
+      const dx = this.tx - this.x;
+      const dy = this.ty - this.y;
+      this.vx += dx * 0.06;
+      this.vy += dy * 0.06;
+      this.vx *= 0.78;
+      this.vy *= 0.78;
+      this.x  += this.vx;
+      this.y  += this.vy;
+    }
+    draw(ic, alpha) {
+      const a = alpha * (0.5 + 0.5 * Math.sin(this.phase + performance.now() * 0.002));
+      ic.globalAlpha = Math.max(0, Math.min(1, a));
+      ic.beginPath();
+      ic.arc(this.x, this.y, this.r, 0, Math.PI*2);
+      ic.fill();
+    }
+  }
+
+  const MASK_W = 180, MASK_H = 320;
+  const N_PARTICLES = 360;
+
+  function makeHandParticles(mirrorX, offsetX, offsetY, cW, cH) {
+    const mask = buildHandMask(MASK_W, MASK_H);
+    const pts  = sampleEdgeParticles(mask, N_PARTICLES);
+    return pts.map(([nx, ny]) => {
+      const mx = mirrorX ? (1 - nx) : nx;
+      const px = offsetX + mx * MASK_W / cW;
+      const py = offsetY + ny * MASK_H / cH;
+      return new Particle(px, py, cW, cH);
+    });
+  }
+
+  const PAD  = 0.04;
+  const handNW = MASK_W / PW;
+  const handNH = MASK_H / PH;
+
+  const lOffX = 0.5 - handNW - PAD;
+  const lOffY = (1 - handNH) * 0.42;
+  const rOffX = 0.5 + PAD;
+  const rOffY = lOffY;
+
+  const leftParticles  = makeHandParticles(false, lOffX, lOffY, PW, PH);
+  const rightParticles = makeHandParticles(true,  rOffX, rOffY, PW, PH);
+  const allParticles   = [...leftParticles, ...rightParticles];
+
+  function animate(ts) {
+    ic.clearRect(0, 0, PW, PH);
+
+    const globalBlink = 0.5 + 0.5 * Math.sin(ts * 0.0022);
+    const baseAlpha   = 0.3 + globalBlink * 0.7;
+
+    ic.fillStyle    = '#ffffff';
+    ic.shadowColor  = 'rgba(255,255,255,0.9)';
+    ic.shadowBlur   = 6;
+
+    allParticles.forEach(p => {
+      p.update(ts);
+      p.draw(ic, baseAlpha);
+    });
+
+    ic.globalAlpha = 1;
+    requestAnimationFrame(animate);
+  }
+
+  requestAnimationFrame(animate);
+})();
+
+
+// ═══════════════════════════════════════════════════════
+//  WebGL 배경 물결 렌더러
+// ═══════════════════════════════════════════════════════
+const bgCanvas = document.getElementById('bg-canvas');
+const gl = bgCanvas.getContext('webgl') || bgCanvas.getContext('experimental-webgl');
+
+const VS_SRC = `
+  attribute vec2 a_pos;
+  varying vec2 v_uv;
+  void main() {
+    v_uv = a_pos * 0.5 + 0.5;
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+  }
+`;
+
+const FS_SRC = `
+  precision mediump float;
+  uniform sampler2D u_tex;
+  uniform float u_time;
+  uniform vec2 u_res;
+  uniform vec2 u_imgAspect;
+  uniform int u_numRipples;
+  uniform vec2 u_ripples[10];
+  uniform float u_rippleAge[10];
+  varying vec2 v_uv;
+
+  void main() {
+    vec2 uv = v_uv;
+
+    vec2 screenAspect = vec2(u_res.x / u_res.y, 1.0);
+    vec2 totalDisplace = vec2(0.0);
+    for (int i = 0; i < 10; i++) {
+      if (i >= u_numRipples) break;
+      float age  = u_rippleAge[i];
+      vec2  diff = (uv - u_ripples[i]) * screenAspect;
+      float dist = length(diff);
+      float wave = sin(dist * 55.0 - u_time * 5.0 + age * 18.0);
+      float env  = (1.0 - age) * exp(-dist * 4.5) * exp(-age * 3.2);
+      if (dist > 0.001) totalDisplace += normalize(diff) * wave * env * 0.018;
+    }
+    uv += totalDisplace;
+
+    float localY;
+    if (uv.y < 0.5) {
+      localY = uv.y * 2.0;
+    } else {
+      localY = (1.0 - uv.y) * 2.0;
+    }
+
+    float screenAR = u_res.x / u_res.y;
+    float halfAR   = screenAR * 2.0;
+    float imgAR    = u_imgAspect.x;
+
+    const float ZOOM = 0.92;
+    float tx, ty;
+    if (halfAR > imgAR) {
+      float cropY = imgAR / halfAR * ZOOM;
+      float offsetY = (1.0 - cropY) * 0.5;
+      tx = (uv.x - 0.5) * ZOOM + 0.5;
+      ty = offsetY + localY * cropY;
+    } else {
+      float cropX = halfAR / imgAR * ZOOM;
+      float offsetX = (1.0 - cropX) * 0.5;
+      tx = offsetX + uv.x * cropX;
+      ty = (localY - 0.5) * ZOOM + 0.5;
+    }
+
+    gl_FragColor = texture2D(u_tex, clamp(vec2(tx, ty), 0.0, 1.0));
+  }
+`;
+
+function compileShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  return s;
+}
+
+let glProgram = null;
+let glTex = null;
+let bgLoaded = false;
+let imgAspectRatio = 1.0;
+
+function initGL() {
+  const prog = gl.createProgram();
+  gl.attachShader(prog, compileShader(gl.VERTEX_SHADER, VS_SRC));
+  gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FS_SRC));
+  gl.linkProgram(prog);
+  glProgram = prog;
+  gl.useProgram(prog);
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'a_pos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+}
+
+function loadBgTexture(img) {
+  glTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, glTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  imgAspectRatio = img.naturalWidth / img.naturalHeight;
+  bgLoaded = true;
+}
+
+const MAX_RIPPLES = 10;
+let ripples = [];
+
+function addRipple(nx, ny) {
+  for (const r of ripples) {
+    if (Math.hypot(r.x - nx, r.y - ny) < 0.04) return;
+  }
+  ripples.push({ x: nx, y: ny, age: 0 });
+  if (ripples.length > MAX_RIPPLES) ripples.shift();
+}
+
+function updateAndRenderGL(time) {
+  ripples = ripples.filter(r => r.age < 1.0);
+  ripples.forEach(r => { r.age = Math.min(r.age + 0.01, 1.0); });
+
+  const W = bgCanvas.width, H = bgCanvas.height;
+  gl.viewport(0, 0, W, H);
+  gl.useProgram(glProgram);
+
+  gl.uniform1f(gl.getUniformLocation(glProgram, 'u_time'), time * 0.001);
+  gl.uniform2f(gl.getUniformLocation(glProgram, 'u_res'), W, H);
+  gl.uniform2f(gl.getUniformLocation(glProgram, 'u_imgAspect'), imgAspectRatio, 1.0);
+  gl.uniform1i(gl.getUniformLocation(glProgram, 'u_numRipples'), ripples.length);
+
+  const rPos = new Float32Array(MAX_RIPPLES * 2);
+  const rAge = new Float32Array(MAX_RIPPLES);
+  ripples.forEach((r, i) => { rPos[i*2]=r.x; rPos[i*2+1]=r.y; rAge[i]=r.age; });
+
+  gl.uniform2fv(gl.getUniformLocation(glProgram, 'u_ripples'), rPos);
+  gl.uniform1fv(gl.getUniformLocation(glProgram, 'u_rippleAge'), rAge);
+  gl.uniform1i(gl.getUniformLocation(glProgram, 'u_tex'), 0);
+  gl.bindTexture(gl.TEXTURE_2D, glTex);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+}
+
+// ═══════════════════════════════════════════════════════
+//  손 캔버스
+// ═══════════════════════════════════════════════════════
+const handCanvas = document.getElementById('hand-canvas');
+const ctx = handCanvas.getContext('2d');
+const video = document.getElementById('webcam');
+
+function resizeAll() {
+  bgCanvas.width  = window.innerWidth;
+  bgCanvas.height = window.innerHeight;
+  handCanvas.width  = window.innerWidth;
+  handCanvas.height = window.innerHeight;
+}
+resizeAll();
+window.addEventListener('resize', resizeAll);
+
+let allHandLandmarks = [];
+let smoothedHands = [];
+let prevHandCenters = [];
+
+const FINGER_TIPS = [4, 8, 12, 16, 20];
+const FINGER_PIPS = [3, 7, 11, 15, 19];
+
+function isFingerUp(lm, f) {
+  if (f === 0) return lm[4].x < lm[3].x;
+  return lm[FINGER_TIPS[f]].y < lm[FINGER_PIPS[f]].y;
+}
+function countFingers(lm) {
+  let c = 0;
+  for (let i = 0; i < 5; i++) if (isFingerUp(lm, i)) c++;
+  return c;
+}
+function smoothLandmarks(curr, prev, alpha = 0.35) {
+  if (!prev) return curr.map(p => ({...p}));
+  return curr.map((p, i) => ({
+    x: prev[i].x*(1-alpha) + p.x*alpha,
+    y: prev[i].y*(1-alpha) + p.y*alpha,
+    z: (prev[i].z||0)*(1-alpha) + (p.z||0)*alpha
+  }));
+}
+
+function triggerRipplesFromHands(hands) {
+  hands.forEach((lm, hi) => {
+    const cx = (lm[0].x + lm[9].x) / 2;
+    const cy = (lm[0].y + lm[9].y) / 2;
+    const prev = prevHandCenters[hi];
+    if (prev) {
+      const speed = Math.hypot(cx - prev.x, cy - prev.y);
+      if (speed > 0.007) {
+        [0, 4, 8, 12, 16, 20].forEach(ti => {
+          addRipple(1 - lm[ti].x, lm[ti].y);
+        });
+      }
+    }
+    prevHandCenters[hi] = { x: cx, y: cy };
+  });
+  if (hands.length < prevHandCenters.length) prevHandCenters.length = hands.length;
+}
+
+let lensOff = null, lensOffCtx = null;
+let stampOff = null, stampR = 0;
+let bgSnap = null;
+let globalTime = 0;
+
+const NR = 0, NG = 100, NB = 255;
+
+function ensureOffscreens(r) {
+  const sd = Math.ceil(r * 2) + 4;
+  if (!lensOff || lensOff.width < sd) {
+    lensOff = document.createElement('canvas');
+    lensOff.width = sd; lensOff.height = sd;
+    lensOffCtx = lensOff.getContext('2d');
+  }
+  if (!stampOff || Math.abs(stampR - r) > 0.5) {
+    stampR = r;
+    stampOff = document.createElement('canvas');
+    stampOff.width = sd; stampOff.height = sd;
+    const sc = stampOff.getContext('2d');
+    const cr = sd / 2;
+    sc.save();
+    sc.beginPath(); sc.arc(cr, cr, r, 0, Math.PI*2); sc.clip();
+    const eg = sc.createRadialGradient(cr, cr, r*0.4, cr, cr, r);
+    eg.addColorStop(0,   'rgba(0,0,0,0)');
+    eg.addColorStop(0.7, 'rgba(0,0,0,0.1)');
+    eg.addColorStop(1,   'rgba(0,0,0,0.6)');
+    sc.fillStyle = eg; sc.fillRect(0, 0, sd, sd);
+    sc.fillStyle = `rgba(${NR},${NG},${NB},0.15)`; sc.fillRect(0, 0, sd, sd);
+    const sg = sc.createRadialGradient(cr-r*0.3, cr-r*0.35, 0, cr-r*0.1, cr-r*0.1, r*0.7);
+    sg.addColorStop(0,   'rgba(180,255,240,0.8)');
+    sg.addColorStop(0.4, 'rgba(180,255,240,0.15)');
+    sg.addColorStop(1,   'rgba(180,255,240,0)');
+    sc.fillStyle = sg; sc.fillRect(0, 0, sd, sd);
+    sc.restore();
+    sc.strokeStyle = `rgba(${NR},${NG},${NB},0.9)`;
+    sc.lineWidth = 1.5;
+    sc.beginPath(); sc.arc(cr, cr, r-0.5, 0, Math.PI*2); sc.stroke();
+  }
+}
+
+function buildTiles(landmarks) {
+  const W = handCanvas.width, H = handCanvas.height;
+  const tileSize = Math.max(6, Math.min(W, H) * 0.012);
+  const gap = tileSize * 0.92;
+
+  const SCALE_UP = 1.15;
+  const palmCx = landmarks.reduce((s,l) => s + l.x, 0) / landmarks.length;
+  const palmCy = landmarks.reduce((s,l) => s + l.y, 0) / landmarks.length;
+  const scaled = landmarks.map(lm => ({
+    x: palmCx + (lm.x - palmCx) * SCALE_UP,
+    y: palmCy + (lm.y - palmCy) * SCALE_UP,
+    z: lm.z
+  }));
+
+  const FINGER_BASES = [1, 5, 9, 13, 17];
+  const FINGER_MIDS  = [2, 6, 10, 14, 18];
+  const FINGER_TIPS_IDX = [4, 8, 12, 16, 20];
+  const STRETCH = 1.15, STRETCH_MID = 1.08;
+
+  let deformed = scaled.map((lm, i) => {
+    if (FINGER_TIPS_IDX.includes(i)) {
+      const fi = FINGER_TIPS_IDX.indexOf(i);
+      const base = scaled[FINGER_BASES[fi]];
+      return { x: base.x+(lm.x-base.x)*STRETCH, y: base.y+(lm.y-base.y)*STRETCH, z: lm.z };
+    }
+    if (FINGER_MIDS.includes(i)) {
+      const fi = FINGER_MIDS.indexOf(i);
+      const base = scaled[FINGER_BASES[fi]];
+      return { x: base.x+(lm.x-base.x)*STRETCH_MID, y: base.y+(lm.y-base.y)*STRETCH_MID, z: lm.z };
+    }
+    return lm;
+  });
+
+  const pts = deformed.map(lm => ({ x: (1 - lm.x) * W, y: lm.y * H }));
+
+  const tileSet = new Set(), tiles = [];
+  function addTile(wx, wy) {
+    const tx = Math.round(wx / gap), ty = Math.round(wy / gap);
+    const key = (tx + 16384) * 65536 + (ty + 16384);
+    if (!tileSet.has(key)) { tileSet.add(key); tiles.push({ cx: tx * gap, cy: ty * gap }); }
+  }
+
+  function fillCapsule(p1, p2, w1, w2) {
+    const dx = p2.x - p1.x, dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 0.5) return;
+    const nx = -dy / len, ny = dx / len;
+    const steps = Math.ceil(len / (gap * 0.55));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const mx = p1.x + dx * t, my = p1.y + dy * t;
+      const hw = w1 + (w2 - w1) * t;
+      const wSteps = Math.ceil(hw / gap);
+      for (let w = -wSteps; w <= wSteps; w++) {
+        if (Math.abs(w) * gap <= hw) addTile(mx + nx * w * gap, my + ny * w * gap);
+      }
+    }
+  }
+
+  const T = tileSize;
+
+  fillCapsule(pts[1], pts[2], T*2.2, T*1.9);
+  fillCapsule(pts[2], pts[3], T*1.9, T*1.6);
+  fillCapsule(pts[3], pts[4], T*1.6, T*1.2);
+
+  fillCapsule(pts[5], pts[6], T*1.9, T*1.65);
+  fillCapsule(pts[6], pts[7], T*1.65, T*1.35);
+  fillCapsule(pts[7], pts[8], T*1.35, T*1.0);
+
+  fillCapsule(pts[9],  pts[10], T*2.0, T*1.75);
+  fillCapsule(pts[10], pts[11], T*1.75, T*1.45);
+  fillCapsule(pts[11], pts[12], T*1.45, T*1.1);
+
+  fillCapsule(pts[13], pts[14], T*1.85, T*1.6);
+  fillCapsule(pts[14], pts[15], T*1.6,  T*1.3);
+  fillCapsule(pts[15], pts[16], T*1.3,  T*1.0);
+
+  fillCapsule(pts[17], pts[18], T*1.5, T*1.25);
+  fillCapsule(pts[18], pts[19], T*1.25, T*1.0);
+  fillCapsule(pts[19], pts[20], T*1.0,  T*0.8);
+
+  const wDir = (() => {
+    const dx = pts[17].x - pts[5].x, dy = pts[17].y - pts[5].y;
+    const len = Math.hypot(dx, dy);
+    return { x: dx/len, y: dy/len };
+  })();
+  const wristL = { x: pts[0].x - wDir.x*T*2.8, y: pts[0].y - wDir.y*T*2.8 };
+  const wristR = { x: pts[0].x + wDir.x*T*2.8, y: pts[0].y + wDir.y*T*2.8 };
+
+  const wDown = T * 2.5;
+  const wnx = -wDir.y, wny = wDir.x;
+  const wristLB = { x: wristL.x + wnx*wDown, y: wristL.y + wny*wDown };
+  const wristRB = { x: wristR.x + wnx*wDown, y: wristR.y + wny*wDown };
+
+  const palmPoly = [
+    wristLB, wristL,
+    pts[1], pts[5], pts[9], pts[13], pts[17],
+    wristR, wristRB
+  ];
+
+  function pointInPoly(px, py, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length-1; i < poly.length; j = i++) {
+      const xi=poly[i].x, yi=poly[i].y, xj=poly[j].x, yj=poly[j].y;
+      if (((yi>py) !== (yj>py)) && px < (xj-xi)*(py-yi)/(yj-yi)+xi) inside = !inside;
+    }
+    return inside;
+  }
+
+  const minX = Math.min(...palmPoly.map(p=>p.x)) - gap;
+  const maxX = Math.max(...palmPoly.map(p=>p.x)) + gap;
+  const minY = Math.min(...palmPoly.map(p=>p.y)) - gap;
+  const maxY = Math.max(...palmPoly.map(p=>p.y)) + gap;
+
+  for (let x = Math.floor(minX/gap)*gap; x <= maxX; x += gap)
+    for (let y = Math.floor(minY/gap)*gap; y <= maxY; y += gap)
+      if (pointInPoly(x, y, palmPoly)) addTile(x, y);
+
+  fillCapsule(pts[0], pts[1], T*2.2, T*2.0);
+  fillCapsule(pts[0], pts[2], T*2.0, T*1.7);
+
+  return { pts, tiles, tileSize, gap };
+}
+
+function drawPixelHand(landmarks) {
+  if (!bgSnap) return;
+  const { pts, tiles, tileSize } = buildTiles(landmarks);
+  const r = tileSize * 0.54;
+  const sd = Math.ceil(r*2) + 4;
+  const pulse = 0.5 + 0.5 * Math.sin(globalTime * 0.003);
+  ensureOffscreens(r);
+
+  tiles.forEach(({cx,cy}) => {
+    const d = Math.ceil(r*2), scale = 1.2;
+    const sw = d*scale, sh = d*scale;
+    lensOffCtx.clearRect(0, 0, sd, sd);
+    lensOffCtx.save();
+    lensOffCtx.beginPath(); lensOffCtx.arc(sd/2, sd/2, r, 0, Math.PI*2); lensOffCtx.clip();
+    lensOffCtx.drawImage(bgSnap, cx-sw/2, cy-sh/2, sw, sh, 0, 0, sd, sd);
+    lensOffCtx.restore();
+    lensOffCtx.drawImage(stampOff, 0, 0);
+    ctx.drawImage(lensOff, 0, 0, sd, sd, cx-sd/2, cy-sd/2, sd, sd);
+  });
+
+  const tipR = r * 1.8;
+  ctx.save();
+  ctx.shadowColor = `rgba(${NR},${NG},${NB},1)`;
+  ctx.shadowBlur  = tipR * 2.5;
+  ctx.strokeStyle = `rgba(${NR},${NG},${NB},${(0.75+pulse*0.25).toFixed(2)})`;
+  ctx.lineWidth   = 1.8;
+  ctx.beginPath();
+  [4,8,12,16,20].forEach(ti => {
+    const fx=pts[ti].x, fy=pts[ti].y;
+    ctx.moveTo(fx, fy-tipR*1.1); ctx.lineTo(fx+tipR*0.65, fy);
+    ctx.lineTo(fx, fy+tipR*1.1); ctx.lineTo(fx-tipR*0.65, fy);
+    ctx.closePath();
+  });
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ─── 인트로 화면 종료 (양손 감지 시) ───
+let introGone = false;
+function dismissIntro() {
+  if (introGone) return;
+  introGone = true;
+  const intro = document.getElementById('intro-screen');
+  intro.classList.add('fade-out');
+  setTimeout(() => { intro.style.display = 'none'; }, 850);
+}
+
+// ─── 메인 루프 ───
+let lastSnapshotTime = -999;
+
+function render(time) {
+  globalTime = time;
+  if (bgLoaded) updateAndRenderGL(time);
+
+  ctx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+
+  if (smoothedHands.length > 0) {
+    if (smoothedHands.length >= 2) dismissIntro();
+
+    if (time - lastSnapshotTime > 50) {
+      const snap = document.createElement('canvas');
+      snap.width = bgCanvas.width; snap.height = bgCanvas.height;
+      snap.getContext('2d').drawImage(bgCanvas, 0, 0);
+      bgSnap = snap;
+      lastSnapshotTime = time;
+    }
+
+    triggerRipplesFromHands(smoothedHands);
+    smoothedHands.forEach(lm => drawPixelHand(lm));
+  } else {
+    bgSnap = null;
+    prevHandCenters.length = 0;
+  }
+
+  requestAnimationFrame(render);
+}
+
+// ─── 카메라 & MediaPipe 자동 시작 ───
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{width:640,height:480,facingMode:'user'} });
+    video.srcObject = stream;
+    initMediaPipe();
+  } catch(e) {
+    console.warn('Camera access denied:', e);
+  }
+}
+
+function initMediaPipe() {
+  const hands = new Hands({ locateFile: f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6
+  });
+
+  hands.onResults(results => {
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      allHandLandmarks = results.multiHandLandmarks;
+      smoothedHands = allHandLandmarks.map((lm, i) =>
+        smoothLandmarks(lm, smoothedHands[i] || null)
+      );
+    } else {
+      allHandLandmarks = [];
+      smoothedHands = [];
+    }
+  });
+
+  const camera = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 640, height: 480
+  });
+  camera.start();
+}
+
+// 초기화
+initGL();
+const bgImg = new Image();
+bgImg.src = 'handbg.png';
+bgImg.onload = () => loadBgTexture(bgImg);
+
+requestAnimationFrame(render);
+
+window.addEventListener('load', () => {
+  startCamera();
+});
+</script>
+</body>
+</html>

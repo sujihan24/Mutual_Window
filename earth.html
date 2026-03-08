@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>Blink FX</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    overflow: hidden;
+    font-family: 'Black Han Sans', sans-serif;
+  }
+
+  video {
+    position: fixed;
+    top: 0; left: 0;
+    opacity: 0.15;
+    transform: scaleX(-1);
+    z-index: 0;
+  }
+
+  canvas#fx {
+    position: fixed;
+    top: 0; left: 0;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  #stage {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+
+  #shape {
+    width: 160px;
+    height: 160px;
+    position: relative;
+    transition: filter 0.1s;
+  }
+
+  #shape svg {
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  #label {
+    font-size: 28px;
+    letter-spacing: 0.2em;
+    color: #fff;
+    opacity: 0;
+    text-transform: uppercase;
+    text-shadow:
+      0 0 10px currentColor,
+      0 0 30px currentColor,
+      0 0 60px currentColor;
+    transition: opacity 0.3s;
+  }
+
+  #label.show {
+    opacity: 1;
+    animation: glitch 0.5s steps(2) forwards;
+  }
+
+  @keyframes glitch {
+    0%   { clip-path: inset(0 0 90% 0); transform: translateX(-4px); }
+    10%  { clip-path: inset(30% 0 50% 0); transform: translateX(4px); }
+    20%  { clip-path: inset(60% 0 20% 0); transform: translateX(-2px); }
+    30%  { clip-path: inset(10% 0 80% 0); transform: translateX(3px); }
+    40%  { clip-path: inset(0); transform: translateX(0); }
+    100% { clip-path: inset(0); opacity: 1; }
+  }
+
+  #blinkCount {
+    position: fixed;
+    top: 24px; right: 32px;
+    font-size: 13px;
+    letter-spacing: 0.15em;
+    color: rgba(255,255,255,0.4);
+    z-index: 10;
+    text-transform: uppercase;
+  }
+
+  #eyeStatus {
+    position: fixed;
+    top: 24px; left: 32px;
+    font-size: 13px;
+    letter-spacing: 0.15em;
+    color: rgba(255,255,255,0.4);
+    z-index: 10;
+  }
+</style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline></video>
+<canvas id="fx"></canvas>
+
+<div id="stage">
+  <div id="shape">
+    <svg id="shapeSvg" viewBox="-80 -80 160 160"></svg>
+  </div>
+  <div id="label">BLINK</div>
+</div>
+
+<div id="blinkCount">BLINKS: 0</div>
+<div id="eyeStatus">👁 OPEN</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("fx");
+const ctx = canvas.getContext("2d");
+const shapeSvg = document.getElementById("shapeSvg");
+const label = document.getElementById("label");
+const blinkCountEl = document.getElementById("blinkCount");
+const eyeStatusEl = document.getElementById("eyeStatus");
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+window.addEventListener("resize", () => {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+});
+
+// ── 테마 사이클 ──────────────────────────────────────────
+const THEMES = [
+  { bg: ["#0a0a1a", "#1a0a2e"], accent: "#00f5ff", accent2: "#ff00aa", name: "CYAN" },
+  { bg: ["#1a0a00", "#2e1a00"], accent: "#ff6600", accent2: "#ffcc00", name: "FIRE" },
+  { bg: ["#001a00", "#001a10"], accent: "#00ff66", accent2: "#ccff00", name: "MATRIX" },
+  { bg: ["#1a001a", "#2e002e"], accent: "#ff00ff", accent2: "#8800ff", name: "NEON" },
+  { bg: ["#000a1a", "#001a2e"], accent: "#0088ff", accent2: "#00ffcc", name: "OCEAN" },
+];
+
+let themeIndex = 0;
+let blinkCount = 0;
+let eyeClosed = false;
+let particles = [];
+let rings = [];
+let bgGrad = null;
+
+// ── 배경 그라디언트 (body) ───────────────────────────────
+function applyTheme(t) {
+  document.body.style.background =
+    `radial-gradient(ellipse at center, ${t.bg[1]} 0%, ${t.bg[0]} 100%)`;
+}
+applyTheme(THEMES[0]);
+
+// ── SVG 도형 생성기 ──────────────────────────────────────
+const SHAPES = [makeStar, makeHex, makeDiamond, makeSpiral, makeTriforce, makeCross];
+
+function makeStar(svg, color, color2) {
+  const pts = [];
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? 70 : 30;
+    const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    pts.push(`${r * Math.cos(a)},${r * Math.sin(a)}`);
+  }
+  const p = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+  p.setAttribute("points", pts.join(" "));
+  p.setAttribute("fill", "none");
+  p.setAttribute("stroke", color);
+  p.setAttribute("stroke-width", "3");
+  p.setAttribute("filter", "url(#glow)");
+  addInnerStar(svg, color2, 0.5);
+  svg.appendChild(p);
+  addRotateAnim(p, 8);
+  addGlowFilter(svg, color);
+}
+
+function addInnerStar(svg, color, opacity) {
+  const pts = [];
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? 40 : 15;
+    const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    pts.push(`${r * Math.cos(a)},${r * Math.sin(a)}`);
+  }
+  const p = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+  p.setAttribute("points", pts.join(" "));
+  p.setAttribute("fill", color);
+  p.setAttribute("opacity", opacity);
+  svg.appendChild(p);
+  addRotateAnim(p, -5);
+}
+
+function makeHex(svg, color, color2) {
+  const pts = Array.from({length:6}, (_,i) => {
+    const a = (i/6)*Math.PI*2;
+    return `${68*Math.cos(a)},${68*Math.sin(a)}`;
+  });
+  const p = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+  p.setAttribute("points", pts.join(" "));
+  p.setAttribute("fill", "none");
+  p.setAttribute("stroke", color);
+  p.setAttribute("stroke-width", "3");
+  p.setAttribute("filter", "url(#glow)");
+  svg.appendChild(p);
+
+  const inner = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+  inner.setAttribute("points", Array.from({length:6}, (_,i) => {
+    const a = (i/6)*Math.PI*2 + Math.PI/6;
+    return `${38*Math.cos(a)},${38*Math.sin(a)}`;
+  }).join(" "));
+  inner.setAttribute("fill", color2);
+  inner.setAttribute("opacity", "0.6");
+  svg.appendChild(inner);
+  addRotateAnim(p, 12);
+  addRotateAnim(inner, -7);
+  addGlowFilter(svg, color);
+}
+
+function makeDiamond(svg, color, color2) {
+  const pts = "0,-70 60,0 0,70 -60,0";
+  const p = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+  p.setAttribute("points", pts);
+  p.setAttribute("fill", "none");
+  p.setAttribute("stroke", color);
+  p.setAttribute("stroke-width", "3");
+  p.setAttribute("filter", "url(#glow)");
+  svg.appendChild(p);
+
+  for (let s = 0.6; s > 0.1; s -= 0.15) {
+    const inner = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+    inner.setAttribute("points", `0,${-70*s} ${60*s},0 0,${70*s} ${-60*s},0`);
+    inner.setAttribute("fill", "none");
+    inner.setAttribute("stroke", color2);
+    inner.setAttribute("stroke-width", "1");
+    inner.setAttribute("opacity", s.toFixed(1));
+    svg.appendChild(inner);
+    addRotateAnim(inner, s * 10);
+  }
+  addGlowFilter(svg, color);
+}
+
+function makeSpiral(svg, color, color2) {
+  let d = "M 0 0";
+  for (let t = 0; t < 6 * Math.PI; t += 0.1) {
+    const r = t * 10;
+    d += ` L ${r * Math.cos(t)},${r * Math.sin(t)}`;
+  }
+  const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+  p.setAttribute("d", d);
+  p.setAttribute("fill", "none");
+  p.setAttribute("stroke", color);
+  p.setAttribute("stroke-width", "2");
+  p.setAttribute("filter", "url(#glow)");
+  svg.appendChild(p);
+  addRotateAnim(p, 4);
+  addGlowFilter(svg, color);
+}
+
+function makeTriforce(svg, color, color2) {
+  const tris = [
+    "0,-70 -60,10 60,10",
+    "-60,10 -120,80 0,80",
+    "60,10 0,80 120,80",
+  ].map((pts, i) => {
+    const p = document.createElementNS("http://www.w3.org/2000/svg","polygon");
+    p.setAttribute("points", pts);
+    p.setAttribute("fill", i === 0 ? color : color2);
+    p.setAttribute("opacity", "0.8");
+    p.setAttribute("filter", "url(#glow)");
+    svg.appendChild(p);
+    return p;
+  });
+  const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+  tris.forEach(t => g.appendChild(t.cloneNode()));
+  addRotateAnim(svg.firstChild, 6);
+  addGlowFilter(svg, color);
+}
+
+function makeCross(svg, color, color2) {
+  const arms = [
+    `M 0,-70 L 14,-14 L 70,0 L 14,14 L 0,70 L -14,14 L -70,0 L -14,-14 Z`
+  ];
+  arms.forEach(d => {
+    const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+    p.setAttribute("d", d);
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", color);
+    p.setAttribute("stroke-width", "3");
+    p.setAttribute("filter", "url(#glow)");
+    svg.appendChild(p);
+    addRotateAnim(p, 10);
+  });
+  const c = document.createElementNS("http://www.w3.org/2000/svg","circle");
+  c.setAttribute("r", "20");
+  c.setAttribute("fill", color2);
+  c.setAttribute("opacity", "0.8");
+  c.setAttribute("filter", "url(#glow)");
+  svg.appendChild(c);
+  addGlowFilter(svg, color);
+}
+
+function addGlowFilter(svg, color) {
+  const defs = document.createElementNS("http://www.w3.org/2000/svg","defs");
+  defs.innerHTML = `
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="${color}" flood-opacity="0.8" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>`;
+  svg.insertBefore(defs, svg.firstChild);
+}
+
+function addRotateAnim(el, speed) {
+  let angle = 0;
+  const id = setInterval(() => {
+    angle += speed * 0.02;
+    el.setAttribute("transform", `rotate(${angle})`);
+  }, 16);
+  el._animId = id;
+}
+
+let shapeIndex = 0;
+function renderShape() {
+  shapeSvg.innerHTML = "";
+  const t = THEMES[themeIndex];
+  SHAPES[shapeIndex](shapeSvg, t.accent, t.accent2);
+}
+renderShape();
+
+// ── 파티클 ───────────────────────────────────────────────
+function spawnParticles() {
+  const t = THEMES[themeIndex];
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const colors = [t.accent, t.accent2, "#ffffff"];
+
+  for (let i = 0; i < 80; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 10;
+    const size = 2 + Math.random() * 5;
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      alpha: 1,
+      decay: 0.01 + Math.random() * 0.025,
+      trail: [],
+    });
+  }
+}
+
+function spawnRing() {
+  const t = THEMES[themeIndex];
+  rings.push({
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    r: 10,
+    maxR: Math.max(canvas.width, canvas.height) * 0.7,
+    color: t.accent,
+    alpha: 1,
+  });
+}
+
+// ── 캔버스 애니메이션 루프 ───────────────────────────────
+function animate() {
+  requestAnimationFrame(animate);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // rings
+  for (let i = rings.length - 1; i >= 0; i--) {
+    const rg = rings[i];
+    rg.r += 12;
+    rg.alpha = 1 - rg.r / rg.maxR;
+    if (rg.alpha <= 0) { rings.splice(i, 1); continue; }
+    ctx.beginPath();
+    ctx.arc(rg.x, rg.y, rg.r, 0, Math.PI * 2);
+    ctx.strokeStyle = rg.color;
+    ctx.lineWidth = 3;
+    ctx.globalAlpha = rg.alpha;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.trail.push({ x: p.x, y: p.y });
+    if (p.trail.length > 8) p.trail.shift();
+
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.97;
+    p.vy *= 0.97;
+    p.alpha -= p.decay;
+
+    if (p.alpha <= 0) { particles.splice(i, 1); continue; }
+
+    // trail
+    for (let j = 0; j < p.trail.length; j++) {
+      const ta = (j / p.trail.length) * p.alpha * 0.5;
+      ctx.beginPath();
+      ctx.arc(p.trail[j].x, p.trail[j].y, p.size * 0.5, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = ta;
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = p.alpha;
+    ctx.shadowBlur = 16;
+    ctx.shadowColor = p.color;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+}
+animate();
+
+// ── 깜빡임 이벤트 ────────────────────────────────────────
+function onBlink() {
+  blinkCount++;
+  themeIndex = (themeIndex + 1) % THEMES.length;
+  shapeIndex = (shapeIndex + 1) % SHAPES.length;
+
+  applyTheme(THEMES[themeIndex]);
+  renderShape();
+
+  spawnParticles();
+  spawnRing();
+  spawnRing();
+
+  label.textContent = THEMES[themeIndex].name;
+  label.classList.remove("show");
+  void label.offsetWidth;
+  label.classList.add("show");
+  label.style.color = THEMES[themeIndex].accent;
+  setTimeout(() => label.classList.remove("show"), 1000);
+
+  blinkCountEl.textContent = `BLINKS: ${blinkCount}`;
+
+  // 화면 섬광
+  const flash = document.createElement("div");
+  Object.assign(flash.style, {
+    position: "fixed", inset: "0",
+    background: THEMES[themeIndex].accent,
+    opacity: "0.3", zIndex: "3",
+    pointerEvents: "none",
+    transition: "opacity 0.4s",
+  });
+  document.body.appendChild(flash);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => { flash.style.opacity = "0"; });
+  });
+  setTimeout(() => flash.remove(), 500);
+}
+
+// ── FaceMesh ─────────────────────────────────────────────
+function eyeDistance(a, b) { return Math.abs(a.y - b.y); }
+
+const faceMesh = new FaceMesh({
+  locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`
+});
+faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true });
+
+faceMesh.onResults(results => {
+  if (!results.multiFaceLandmarks?.length) return;
+  const lm = results.multiFaceLandmarks[0];
+  const leftEye = eyeDistance(lm[159], lm[145]);
+  const rightEye = eyeDistance(lm[386], lm[374]);
+  const eyeAvg = (leftEye + rightEye) / 2;
+
+  if (eyeAvg < 0.018 && !eyeClosed) {
+    eyeClosed = true;
+    eyeStatusEl.textContent = "😑 CLOSED";
+  }
+  if (eyeAvg > 0.025 && eyeClosed) {
+    eyeClosed = false;
+    eyeStatusEl.textContent = "👁 OPEN";
+    onBlink();
+  }
+});
+
+const camera = new Camera(video, {
+  onFrame: async () => { await faceMesh.send({ image: video }); },
+  width: 640, height: 480
+});
+camera.start();
+</script>
+</body>
+</html>
