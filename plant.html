@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlantStudio - Library of wildflowers</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'MS Sans Serif', 'Microsoft Sans Serif', sans-serif;
+            /* 배경 이미지 설정: 아래 url()에 원하는 이미지 경로 입력 */
+            background: #008080 url('poster_ps.png') center/cover no-repeat fixed;
+            /* 
+            예시:
+            background: url('https://example.com/image.jpg') center/cover no-repeat fixed;
+            background: url('background.jpg') center/cover no-repeat fixed;
+            
+            배경색만 사용하려면:
+            background: #008080;
+            */
+            padding: 20px;
+            overflow: hidden;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+
+        /* Dithering effect for retro look */
+        .dithered {
+            filter: contrast(1.1) saturate(0.9);
+        }
+
+        .window {
+            background: #C0C0C0;
+            border: 2px solid;
+            border-color: #DFDFDF #404040 #404040 #DFDFDF;
+            box-shadow: 2px 2px 0 rgba(0,0,0,0.5);
+            width: 800px;
+            margin: 0 auto;
+        }
+
+        .title-bar {
+            background: linear-gradient(90deg, #000080, #1084D0);
+            color: white;
+            padding: 3px 5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .title-bar-text {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .title-bar-icon {
+            width: 16px;
+            height: 16px;
+            background: white;
+            border: 1px solid #000;
+        }
+
+        .title-bar-controls {
+            display: flex;
+            gap: 2px;
+        }
+
+        .title-bar-controls button {
+            width: 16px;
+            height: 14px;
+            background: #C0C0C0;
+            border: 1px solid;
+            border-color: #DFDFDF #404040 #404040 #DFDFDF;
+            font-size: 10px;
+            cursor: pointer;
+            padding: 0;
+        }
+
+        .title-bar-controls button:active {
+            border-color: #404040 #DFDFDF #DFDFDF #404040;
+        }
+
+        .menu-bar {
+            background: #C0C0C0;
+            border-bottom: 1px solid #808080;
+            padding: 2px 5px;
+            font-size: 11px;
+        }
+
+        .menu-bar span {
+            padding: 2px 8px;
+            cursor: pointer;
+        }
+
+        .menu-bar span:hover {
+            background: #000080;
+            color: white;
+        }
+
+        .toolbar {
+            background: #C0C0C0;
+            padding: 5px;
+            border-bottom: 1px solid #808080;
+            display: flex;
+            gap: 3px;
+            align-items: center;
+        }
+
+        .toolbar-button {
+            width: 24px;
+            height: 24px;
+            background: #C0C0C0;
+            border: 1px solid;
+            border-color: #DFDFDF #404040 #404040 #DFDFDF;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .toolbar-button:active {
+            border-color: #404040 #DFDFDF #DFDFDF #404040;
+        }
+
+        .toolbar-separator {
+            width: 1px;
+            height: 24px;
+            background: #808080;
+            margin: 0 2px;
+        }
+
+        .toolbar-input {
+            width: 60px;
+            height: 20px;
+            border: 1px solid;
+            border-color: #404040 #DFDFDF #DFDFDF #404040;
+            background: white;
+            padding: 2px;
+            font-size: 11px;
+        }
+
+        .toolbar-label {
+            font-size: 11px;
+            margin: 0 5px;
+        }
+
+        .main-content {
+            display: flex;
+            height: 400px;
+        }
+
+        .plant-gallery {
+            width: 100%;
+            background: white;
+            border: 2px solid;
+            border-color: #404040 #DFDFDF #DFDFDF #404040;
+            margin: 10px;
+            overflow-y: auto;
+            display: flex;
+            flex-wrap: wrap;
+            padding: 20px;
+            gap: 20px;
+            justify-content: space-around;
+        }
+
+        .plant {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+            padding: 10px;
+        }
+
+        .plant:hover {
+            background: #E0E0E0;
+        }
+
+        .plant-canvas {
+            width: 80px;
+            height: 120px;
+            position: relative;
+            image-rendering: pixelated;
+            image-rendering: -moz-crisp-edges;
+            image-rendering: crisp-edges;
+        }
+
+        .plant-label {
+            font-size: 10px;
+            text-align: center;
+            margin-top: 5px;
+        }
+
+        /* Plant drawing styles with pixelated effect */
+        .stem {
+            position: absolute;
+            background: #2D5016;
+            width: 3px;
+            image-rendering: pixelated;
+            box-shadow: 1px 0 0 #1a3010;
+        }
+
+        .leaf {
+            position: absolute;
+            background: #4A7C30;
+            border-radius: 50% 50% 0 50%;
+            image-rendering: pixelated;
+            box-shadow: inset -1px -1px 0 #356020, 1px 1px 2px rgba(0,0,0,0.3);
+        }
+
+        .flower {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            image-rendering: pixelated;
+        }
+
+        .flower::before,
+        .flower::after {
+            content: '';
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: inherit;
+        }
+
+        .flower::before {
+            left: -6px;
+        }
+
+        .flower::after {
+            left: 6px;
+        }
+
+        .petal {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: inherit;
+        }
+
+        .flower-center {
+            position: absolute;
+            width: 6px;
+            height: 6px;
+            background: #8B4513;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10;
+        }
+
+        .bottom-panel {
+            background: #C0C0C0;
+            border-top: 2px solid;
+            border-color: #DFDFDF #404040 #404040 #DFDFDF;
+            padding: 10px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .plant-list {
+            width: 180px;
+            border: 2px solid;
+            border-color: #404040 #DFDFDF #DFDFDF #404040;
+            background: white;
+            font-size: 11px;
+            overflow-y: auto;
+        }
+
+        .plant-list-item {
+            padding: 4px 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .plant-list-item:hover {
+            background: #000080;
+            color: white;
+        }
+
+        .plant-list-item.selected {
+            background: #000080;
+            color: white;
+        }
+
+        .plant-icon {
+            width: 12px;
+            height: 12px;
+            display: inline-block;
+            background: #FF69B4;
+            border-radius: 50%;
+            border: 1px solid #C71585;
+            position: relative;
+        }
+
+        .plant-icon::after {
+            content: '';
+            position: absolute;
+            width: 2px;
+            height: 6px;
+            background: #2D5016;
+            bottom: -6px;
+            left: 5px;
+        }
+
+        .detail-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .detail-title {
+            font-size: 11px;
+            font-weight: bold;
+            background: #C0C0C0;
+            padding: 2px 5px;
+        }
+
+        .graph-container {
+            background: white;
+            border: 2px solid;
+            border-color: #404040 #DFDFDF #DFDFDF #404040;
+            padding: 10px;
+            flex: 1;
+            position: relative;
+        }
+
+        .graph-label {
+            font-size: 10px;
+            color: #808080;
+        }
+
+        .graph-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            font-size: 11px;
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .spinner {
+            display: flex;
+            flex-direction: column;
+            width: 16px;
+        }
+
+        .spinner-button {
+            width: 16px;
+            height: 9px;
+            background: #C0C0C0;
+            border: 1px solid;
+            border-color: #DFDFDF #404040 #404040 #DFDFDF;
+            cursor: pointer;
+            font-size: 8px;
+            line-height: 1;
+            padding: 0;
+        }
+
+        .spinner-button:active {
+            border-color: #404040 #DFDFDF #DFDFDF #404040;
+        }
+
+        .input-field {
+            width: 40px;
+            height: 18px;
+            border: 1px solid;
+            border-color: #404040 #DFDFDF #DFDFDF #404040;
+            background: white;
+            padding: 2px;
+            font-size: 11px;
+        }
+
+        .button {
+            background: #C0C0C0;
+            border: 2px solid;
+            border-color: #DFDFDF #404040 #404040 #DFDFDF;
+            padding: 4px 12px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .button:active {
+            border-color: #404040 #DFDFDF #DFDFDF #404040;
+        }
+
+        .status-bar {
+            background: #C0C0C0;
+            border-top: 1px solid #DFDFDF;
+            padding: 2px 5px;
+            font-size: 11px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .status-section {
+            border: 1px solid;
+            border-color: #808080 #DFDFDF #DFDFDF #808080;
+            padding: 2px 8px;
+        }
+
+        /* Animation */
+        @keyframes grow {
+            from { transform: scaleY(0); }
+            to { transform: scaleY(1); }
+        }
+
+        .growing {
+            animation: grow 2s ease-out;
+            transform-origin: bottom;
+        }
+
+        /* SVG for graph curve */
+        .growth-curve {
+            stroke: #000;
+            stroke-width: 2;
+            fill: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="window">
+        <!-- Title Bar -->
+        <div class="title-bar">
+            <div class="title-bar-text">
+                <div class="title-bar-icon"></div>
+                PlantStudio - Library of wildflowers [11 plants]
+            </div>
+            <div class="title-bar-controls">
+                <button>_</button>
+                <button>□</button>
+                <button>×</button>
+            </div>
+        </div>
+
+        <!-- Menu Bar -->
+        <div class="menu-bar">
+            <span>File</span>
+            <span>Edit</span>
+            <span>Plant</span>
+            <span>Layout</span>
+            <span>Options</span>
+            <span>Window</span>
+            <span>Help</span>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <button class="toolbar-button" title="New">
+                <svg width="16" height="16" viewBox="0 0 16 16">
+                    <rect x="3" y="2" width="10" height="12" fill="none" stroke="black" stroke-width="1"/>
+                    <path d="M 8 2 L 8 0 L 13 5 L 11 5 Z" fill="black"/>
+                </svg>
+            </button>
+            <button class="toolbar-button" title="Open">
+                <svg width="16" height="16" viewBox="0 0 16 16">
+                    <path d="M 2 4 L 2 13 L 14 13 L 14 6 L 9 6 L 7 4 Z" fill="#FFD700" stroke="black" stroke-width="1"/>
+                </svg>
+            </button>
+            <button class="toolbar-button" title="Save">
+                <svg width="16" height="16" viewBox="0 0 16 16">
+                    <rect x="2" y="2" width="12" height="12" fill="#C0C0C0" stroke="black" stroke-width="1"/>
+                    <rect x="4" y="2" width="8" height="5" fill="#000080"/>
+                    <rect x="6" y="9" width="4" height="5" fill="white" stroke="black" stroke-width="1"/>
+                </svg>
+            </button>
+            <button class="toolbar-button" title="Print">
+                <svg width="16" height="16" viewBox="0 0 16 16">
+                    <rect x="3" y="6" width="10" height="6" fill="#C0C0C0" stroke="black" stroke-width="1"/>
+                    <rect x="5" y="3" width="6" height="4" fill="white" stroke="black" stroke-width="1"/>
+                    <rect x="5" y="10" width="6" height="3" fill="white" stroke="black" stroke-width="1"/>
+                </svg>
+            </button>
+            <div class="toolbar-separator"></div>
+            <button class="toolbar-button" title="Undo">
+                <svg width="16" height="16" viewBox="0 0 16 16">
+                    <path d="M 8 4 L 4 7 L 8 10 L 8 7 Q 12 7 12 10 Q 12 12 10 12" fill="none" stroke="black" stroke-width="1.5"/>
+                </svg>
+            </button>
+            <button class="toolbar-button" title="Zoom">
+                <svg width="16" height="16" viewBox="0 0 16 16">
+                    <circle cx="7" cy="7" r="5" fill="white" stroke="black" stroke-width="1.5"/>
+                    <line x1="10" y1="10" x2="14" y2="14" stroke="black" stroke-width="2"/>
+                </svg>
+            </button>
+            <div class="toolbar-separator"></div>
+            <input type="text" class="toolbar-input" value="100%">
+            <div class="toolbar-separator"></div>
+            <button class="toolbar-button button-scale" title="Scale to Fit">
+                <svg width="16" height="16" viewBox="0 0 16 16">
+                    <rect x="3" y="3" width="10" height="10" fill="white" stroke="black" stroke-width="1"/>
+                    <line x1="1" y1="1" x2="5" y2="5" stroke="black" stroke-width="1"/>
+                    <line x1="15" y1="1" x2="11" y2="5" stroke="black" stroke-width="1"/>
+                    <line x1="1" y1="15" x2="5" y2="11" stroke="black" stroke-width="1"/>
+                    <line x1="15" y1="15" x2="11" y2="11" stroke="black" stroke-width="1"/>
+                </svg>
+            </button>
+            <span class="toolbar-label">Scale to Fit</span>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="plant-gallery" id="plantGallery">
+                <!-- Plants will be generated here -->
+            </div>
+        </div>
+
+        <!-- Bottom Panel -->
+        <div class="bottom-panel">
+            <!-- Plant List -->
+            <div>
+                <div class="detail-title">Power</div>
+                <div class="plant-list" id="plantList">
+                    <div class="plant-list-item selected">
+                        <span class="plant-icon"></span>
+                        fleabane
+                    </div>
+                    <div class="plant-list-item">
+                        <span class="plant-icon"></span>
+                        clover
+                    </div>
+                    <div class="plant-list-item">
+                        <span class="plant-icon"></span>
+                        Solomon's seal
+                    </div>
+                    <div class="plant-list-item">
+                        <span class="plant-icon"></span>
+                        wild pink
+                    </div>
+                    <div class="plant-list-item">
+                        <span class="plant-icon"></span>
+                        yarrow
+                    </div>
+                    <div class="plant-list-item">
+                        <span class="plant-icon"></span>
+                        black-eyed Susan
+                    </div>
+                    <div class="plant-list-item">
+                        <span class="plant-icon"></span>
+                        pink daisy
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detail Panel -->
+            <div class="detail-panel">
+                <div class="detail-title" id="selectedPlantName">fleabane</div>
+                <div class="graph-container">
+                    <svg class="graph-canvas" id="growthGraph" viewBox="0 0 300 80">
+                        <!-- Grid lines -->
+                        <line x1="0" y1="70" x2="300" y2="70" stroke="#E0E0E0" stroke-width="1"/>
+                        <line x1="0" y1="50" x2="300" y2="50" stroke="#E0E0E0" stroke-width="1"/>
+                        <line x1="0" y1="30" x2="300" y2="30" stroke="#E0E0E0" stroke-width="1"/>
+                        <line x1="0" y1="10" x2="300" y2="10" stroke="#E0E0E0" stroke-width="1"/>
+                        
+                        <!-- Growth curve -->
+                        <path class="growth-curve" d="M 10 70 Q 150 10, 290 20"/>
+                        
+                        <!-- Axis labels -->
+                        <text x="10" y="78" font-size="8" fill="#808080">%max</text>
+                        <text x="270" y="78" font-size="8" fill="#808080">time (days)</text>
+                    </svg>
+                </div>
+
+                <!-- Controls -->
+                <div class="controls">
+                    <div class="control-group">
+                        <span>Age:</span>
+                        <input type="text" class="input-field" id="ageInput" value="36">
+                        <div class="spinner">
+                            <button class="spinner-button" onclick="incrementAge()">▲</button>
+                            <button class="spinner-button" onclick="decrementAge()">▼</button>
+                        </div>
+                        <span>days, 100% max size</span>
+                    </div>
+                    <button class="button" onclick="animatePlant()">▶ Animate</button>
+                </div>
+                
+                <!-- Additional Parameters -->
+                <div class="controls" style="margin-top: 5px;">
+                    <div class="control-group">
+                        <span>Rotation:</span>
+                        <input type="text" class="input-field" id="rotationInput" value="0" style="width: 30px;">
+                        <span>°</span>
+                    </div>
+                    <div class="control-group">
+                        <span>Scale:</span>
+                        <input type="text" class="input-field" id="scaleInput" value="100" style="width: 35px;">
+                        <span>%</span>
+                    </div>
+                    <button class="button" onclick="applyParameters()">Apply</button>
+                    <button class="button" onclick="randomizePlant()">Random</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-section" id="statusLifecycle">Age: 36 days</div>
+            <div class="status-section" id="statusRotation">Rotation: 0°</div>
+            <div class="status-section" id="statusScale">Scale: 100%</div>
+            <div class="status-section" id="statusPlants">Plants: 11</div>
+        </div>
+    </div>
+
+    <script>
+        // Enhanced plant data with more parameters
+        const plants = [
+            { name: 'fleabane', stemHeight: 100, flowers: [{color: '#E8B4D9', x: 40, y: 10}], leaves: 4, leafSize: 'medium', flowerType: 'daisy' },
+            { name: 'clover', stemHeight: 80, flowers: [{color: '#D4A5C9', x: 38, y: 15}], leaves: 6, leafSize: 'small', flowerType: 'cluster' },
+            { name: "Solomon's seal", stemHeight: 90, flowers: [{color: '#FFF5E1', x: 42, y: 20}, {color: '#FFF5E1', x: 35, y: 30}], leaves: 5, leafSize: 'large', flowerType: 'bell' },
+            { name: 'wild pink', stemHeight: 95, flowers: [{color: '#FFB6C1', x: 38, y: 12}], leaves: 4, leafSize: 'medium', flowerType: 'star' },
+            { name: 'yarrow', stemHeight: 110, flowers: [{color: '#FFFFFF', x: 40, y: 8}], leaves: 7, leafSize: 'small', flowerType: 'cluster' },
+            { name: 'black-eyed Susan', stemHeight: 105, flowers: [{color: '#FFD700', x: 40, y: 10}], leaves: 5, leafSize: 'medium', flowerType: 'daisy' },
+            { name: 'pink daisy', stemHeight: 85, flowers: [{color: '#FFB6D9', x: 40, y: 15}], leaves: 4, leafSize: 'medium', flowerType: 'daisy' },
+            { name: 'purple iris', stemHeight: 100, flowers: [{color: '#9370DB', x: 40, y: 12}], leaves: 6, leafSize: 'large', flowerType: 'iris' },
+            { name: 'sunflower', stemHeight: 120, flowers: [{color: '#FFD700', x: 40, y: 5}], leaves: 8, leafSize: 'large', flowerType: 'sunflower' },
+            { name: 'dandelion', stemHeight: 70, flowers: [{color: '#FFFF00', x: 40, y: 18}], leaves: 5, leafSize: 'small', flowerType: 'fluffy' },
+            { name: 'goldenrod', stemHeight: 95, flowers: [{color: '#FFD700', x: 40, y: 10}, {color: '#FFD700', x: 35, y: 15}], leaves: 6, leafSize: 'small', flowerType: 'cluster' }
+        ];
+
+        let currentPlantIndex = 0;
+        let currentRotation = 0;
+        let currentScale = 100;
+
+        // Generate detailed flower based on type
+        function createFlower(type, color, x, y) {
+            const flowerContainer = document.createElement('div');
+            flowerContainer.style.position = 'absolute';
+            flowerContainer.style.left = x + 'px';
+            flowerContainer.style.top = y + 'px';
+            
+            if (type === 'daisy' || type === 'sunflower') {
+                // Create petals in circle
+                const petalCount = type === 'sunflower' ? 12 : 8;
+                for (let i = 0; i < petalCount; i++) {
+                    const petal = document.createElement('div');
+                    petal.className = 'petal';
+                    petal.style.background = color;
+                    const angle = (i * 360 / petalCount) * Math.PI / 180;
+                    const distance = type === 'sunflower' ? 8 : 6;
+                    petal.style.left = (Math.cos(angle) * distance) + 'px';
+                    petal.style.top = (Math.sin(angle) * distance) + 'px';
+                    flowerContainer.appendChild(petal);
+                }
+                // Center
+                const center = document.createElement('div');
+                center.className = 'flower-center';
+                center.style.background = type === 'sunflower' ? '#8B4513' : '#FFD700';
+                flowerContainer.appendChild(center);
+            } else if (type === 'cluster') {
+                // Small clustered flowers
+                for (let i = 0; i < 5; i++) {
+                    const dot = document.createElement('div');
+                    dot.style.position = 'absolute';
+                    dot.style.width = '4px';
+                    dot.style.height = '4px';
+                    dot.style.background = color;
+                    dot.style.borderRadius = '50%';
+                    dot.style.left = (Math.random() * 10 - 5) + 'px';
+                    dot.style.top = (Math.random() * 10 - 5) + 'px';
+                    flowerContainer.appendChild(dot);
+                }
+            } else if (type === 'star') {
+                // Star shaped flower
+                for (let i = 0; i < 5; i++) {
+                    const petal = document.createElement('div');
+                    petal.style.position = 'absolute';
+                    petal.style.width = '3px';
+                    petal.style.height = '12px';
+                    petal.style.background = color;
+                    petal.style.transformOrigin = 'center';
+                    petal.style.transform = `rotate(${i * 72}deg)`;
+                    petal.style.left = '3px';
+                    petal.style.top = '-2px';
+                    flowerContainer.appendChild(petal);
+                }
+            } else if (type === 'bell') {
+                // Bell shaped flower
+                const bell = document.createElement('div');
+                bell.style.width = '8px';
+                bell.style.height = '10px';
+                bell.style.background = color;
+                bell.style.borderRadius = '0 0 50% 50%';
+                bell.style.position = 'absolute';
+                flowerContainer.appendChild(bell);
+            } else if (type === 'iris') {
+                // Iris petals
+                for (let i = 0; i < 3; i++) {
+                    const petal = document.createElement('div');
+                    petal.style.position = 'absolute';
+                    petal.style.width = '10px';
+                    petal.style.height = '15px';
+                    petal.style.background = color;
+                    petal.style.borderRadius = '50% 50% 0 0';
+                    petal.style.transform = `rotate(${i * 120}deg)`;
+                    petal.style.transformOrigin = 'bottom center';
+                    petal.style.left = '-2px';
+                    petal.style.top = '-8px';
+                    flowerContainer.appendChild(petal);
+                }
+            } else {
+                // Default simple flower
+                const flower = document.createElement('div');
+                flower.className = 'flower';
+                flower.style.background = color;
+                flowerContainer.appendChild(flower);
+            }
+            
+            return flowerContainer;
+        }
+
+        // Generate plant gallery with detailed graphics
+        function generatePlantGallery() {
+            const gallery = document.getElementById('plantGallery');
+            gallery.innerHTML = '';
+            
+            plants.forEach((plant, index) => {
+                const plantDiv = document.createElement('div');
+                plantDiv.className = 'plant dithered';
+                plantDiv.onclick = () => selectPlant(index);
+                
+                const canvas = document.createElement('div');
+                canvas.className = 'plant-canvas';
+                
+                // Calculate age factor
+                const ageFactor = parseInt(document.getElementById('ageInput').value) / 100;
+                const actualHeight = plant.stemHeight * Math.min(ageFactor, 1);
+                
+                // Stem
+                const stem = document.createElement('div');
+                stem.className = 'stem growing';
+                stem.style.height = actualHeight + 'px';
+                stem.style.left = '40px';
+                stem.style.bottom = '0';
+                canvas.appendChild(stem);
+                
+                // Leaves based on size
+                const leafSizes = {
+                    'small': { w: 6, h: 10 },
+                    'medium': { w: 10, h: 14 },
+                    'large': { w: 14, h: 18 }
+                };
+                const leafSize = leafSizes[plant.leafSize] || leafSizes['medium'];
+                
+                for (let i = 0; i < plant.leaves; i++) {
+                    if (actualHeight > 20 + i * 15) {
+                        const leaf = document.createElement('div');
+                        leaf.className = 'leaf';
+                        leaf.style.width = leafSize.w + 'px';
+                        leaf.style.height = leafSize.h + 'px';
+                        const side = i % 2;
+                        leaf.style.left = (40 + (side ? 8 : -leafSize.w - 4)) + 'px';
+                        leaf.style.bottom = (20 + i * (actualHeight / plant.leaves)) + 'px';
+                        leaf.style.transform = side ? 'rotate(-45deg)' : 'rotate(45deg) scaleX(-1)';
+                        canvas.appendChild(leaf);
+                    }
+                }
+                
+                // Flowers
+                if (actualHeight > plant.stemHeight * 0.7) {
+                    plant.flowers.forEach(flower => {
+                        const flowerEl = createFlower(plant.flowerType, flower.color, flower.x, flower.y);
+                        canvas.appendChild(flowerEl);
+                    });
+                }
+                
+                const label = document.createElement('div');
+                label.className = 'plant-label';
+                label.textContent = plant.name;
+                
+                plantDiv.appendChild(canvas);
+                plantDiv.appendChild(label);
+                gallery.appendChild(plantDiv);
+            });
+        }
+
+        // Select plant
+        function selectPlant(index) {
+            currentPlantIndex = index;
+            const items = document.querySelectorAll('.plant-list-item');
+            items.forEach((item, i) => {
+                item.classList.toggle('selected', i === index);
+            });
+            document.getElementById('selectedPlantName').textContent = plants[index].name;
+            updateGraph();
+        }
+
+        // Plant list selection
+        document.querySelectorAll('.plant-list-item').forEach((item, index) => {
+            item.addEventListener('click', function() {
+                selectPlant(index);
+            });
+        });
+
+        // Age controls
+        function incrementAge() {
+            const input = document.getElementById('ageInput');
+            input.value = Math.min(parseInt(input.value) + 1, 100);
+            generatePlantGallery();
+            updateGraph();
+            updateStatusBar();
+        }
+
+        function decrementAge() {
+            const input = document.getElementById('ageInput');
+            if (parseInt(input.value) > 0) {
+                input.value = parseInt(input.value) - 1;
+                generatePlantGallery();
+                updateGraph();
+                updateStatusBar();
+            }
+        }
+
+        // Update status bar
+        function updateStatusBar() {
+            document.getElementById('statusLifecycle').textContent = `Age: ${document.getElementById('ageInput').value} days`;
+            document.getElementById('statusRotation').textContent = `Rotation: ${currentRotation}°`;
+            document.getElementById('statusScale').textContent = `Scale: ${currentScale}%`;
+        }
+
+        // Apply parameters
+        function applyParameters() {
+            currentRotation = parseInt(document.getElementById('rotationInput').value) || 0;
+            currentScale = parseInt(document.getElementById('scaleInput').value) || 100;
+            
+            const gallery = document.getElementById('plantGallery');
+            gallery.style.transform = `rotate(${currentRotation}deg) scale(${currentScale / 100})`;
+            updateStatusBar();
+        }
+
+        // Randomize plant
+        function randomizePlant() {
+            document.getElementById('ageInput').value = Math.floor(Math.random() * 100);
+            document.getElementById('rotationInput').value = Math.floor(Math.random() * 360) - 180;
+            document.getElementById('scaleInput').value = Math.floor(Math.random() * 100) + 50;
+            generatePlantGallery();
+            applyParameters();
+        }
+
+        // Update growth graph
+        function updateGraph() {
+            const age = parseInt(document.getElementById('ageInput').value);
+            const svg = document.getElementById('growthGraph');
+            const path = svg.querySelector('.growth-curve');
+            
+            // Create S-curve based on age
+            const x = (age / 100) * 280 + 10;
+            const y = 70 - (age / 100) * 50;
+            path.setAttribute('d', `M 10 70 Q ${x} ${Math.max(y, 20)}, 290 ${20 + (100 - age) / 5}`);
+        }
+
+        // Animate function
+        function animatePlant() {
+            const startAge = 0;
+            const endAge = 100;
+            const duration = 3000;
+            const steps = 50;
+            const stepDuration = duration / steps;
+            
+            let currentStep = 0;
+            
+            const interval = setInterval(() => {
+                currentStep++;
+                const age = Math.floor((currentStep / steps) * endAge);
+                document.getElementById('ageInput').value = age;
+                generatePlantGallery();
+                updateGraph();
+                updateStatusBar();
+                
+                if (currentStep >= steps) {
+                    clearInterval(interval);
+                }
+            }, stepDuration);
+        }
+
+        // Initialize
+        generatePlantGallery();
+        updateGraph();
+        updateStatusBar();
+    </script>
+</body>
+</html>

@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windows Task Manager - Infinite Tunnel</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+            background-color: #000;
+            overflow: hidden;
+            cursor: none;
+        }
+
+        /* 웹캠 배경 - 미러 반전, 꽉 채움 */
+        #webcam-bg {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            z-index: 0;
+        }
+
+        /* 세그멘테이션용 숨김 비디오 (같은 스트림 공유) */
+        #webcam-hidden {
+            position: fixed;
+            width: 1px; height: 1px;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #cursor {
+            position: fixed;
+            width: 20px;
+            height: 20px;
+            pointer-events: none;
+            z-index: 9999;
+            transform: translate(-50%, -50%);
+        }
+        #cursor::before,
+        #cursor::after {
+            content: '';
+            position: absolute;
+            background: rgba(0,0,0,0.5);
+        }
+        #cursor::before { left: 50%; top: 0; width: 1px; height: 100%; transform: translateX(-50%); }
+        #cursor::after  { top: 50%; left: 0; height: 1px; width: 100%; transform: translateY(-50%); }
+        #cursor-ring {
+            position: fixed;
+            width: 36px;
+            height: 36px;
+            border: 1.5px solid rgba(0,180,255,0.7);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 9998;
+            transform: translate(-50%, -50%);
+            transition: left 0.12s ease, top 0.12s ease, width 0.2s, height 0.2s, border-color 0.2s;
+        }
+        #cursor-ring.clicking {
+            width: 20px; height: 20px;
+            border-color: rgba(0,180,255,1);
+        }
+
+        #hud {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            background: rgba(240,250,255,0.85);
+            border: 1px solid rgba(0,180,255,0.3);
+            padding: 10px 24px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 11px;
+            color: rgba(0,130,200,0.9);
+            letter-spacing: 0.08em;
+            z-index: 100;
+            backdrop-filter: blur(8px);
+            user-select: none;
+            border-radius: 4px;
+        }
+        #hud .sep { color: rgba(0,180,255,0.3); }
+        #speed-bar {
+            width: 80px;
+            height: 4px;
+            background: rgba(0,180,255,0.15);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        #speed-fill {
+            height: 100%;
+            background: rgba(0,180,255,0.7);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+        #track-bar {
+            width: 60px;
+            height: 4px;
+            background: rgba(0,180,255,0.15);
+            border-radius: 2px;
+            overflow: visible;
+            position: relative;
+        }
+        #track-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(0,200,255,0.9);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 6px rgba(0,200,255,0.8);
+            transition: left 0.15s ease;
+        }
+
+        .container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            perspective: 300px;
+            transform-style: preserve-3d;
+            z-index: 10;
+            /* 터널 전체를 처음엔 숨겼다가 이미지 로드 후 표시 */
+            visibility: hidden;
+        }
+        .container.ready {
+            visibility: visible;
+        }
+
+        .window {
+            position: absolute;
+            width: 100vw;
+            height: 100vh;
+            top: 50%;
+            left: 50%;
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            overflow: hidden;
+            animation: zoomLoop var(--dur, 2s) infinite linear;
+            animation-delay: var(--delay, 0s);
+            transform-origin: center center;
+            backface-visibility: hidden;
+            will-change: transform, opacity;
+        }
+        /* 이미지: 16:9 비율 유지하며 항상 전체 커버 */
+        .window img {
+            position: absolute;
+            top: 50%; left: 50%;
+            /* GPU 레이어 강제 분리 */
+            transform: translate(-50%, -50%) translateZ(0);
+            width: max(100vw, 177.78vh);
+            height: max(100vh, 56.25vw);
+            object-fit: fill;
+            display: block;
+            will-change: transform;
+        }
+
+        @keyframes zoomLoop {
+            0%   { transform: translate(-50%, -50%) translateZ(500px);   opacity: 0; }
+            8%   { opacity: 1; }
+            95%  { opacity: 1; }
+            100% { transform: translate(-50%, -50%) translateZ(-2000px); opacity: 0; }
+        }
+
+        #glitch-flash {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,200,255,0.25);
+            pointer-events: none;
+            z-index: 199;
+            opacity: 0;
+        }
+        #glitch-flash.active {
+            animation: flashBurst 0.3s ease-out forwards;
+        }
+        @keyframes flashBurst {
+            0%   { opacity: 0.5; }
+            15%  { opacity: 0.15; }
+            40%  { opacity: 0.3; }
+            100% { opacity: 0; }
+        }
+
+        .glitch-slice {
+            position: fixed;
+            left: 0; right: 0;
+            pointer-events: none;
+            z-index: 201;
+            mix-blend-mode: multiply;
+            opacity: 0;
+        }
+        .glitch-slice.blue  { background: rgba(0,180,255,0.3); }
+        .glitch-slice.cyan  { background: rgba(0,230,220,0.2); }
+        .glitch-slice.white { background: rgba(200,240,255,0.4); }
+
+        #container.glitching {
+            animation: containerShake 0.4s steps(2) forwards;
+        }
+        @keyframes containerShake {
+            0%  { transform: translate(0,0); }
+            15% { transform: translate(-6px, 3px) skewX(-2deg); }
+            30% { transform: translate(8px, -4px) skewX(3deg); }
+            45% { transform: translate(-4px, 6px); }
+            60% { transform: translate(5px, -2px) skewX(-1deg); }
+            75% { transform: translate(-3px, 1px); }
+            100%{ transform: translate(0,0); }
+        }
+
+        #speed-notify {
+            position: fixed;
+            top: 28px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            color: rgba(0,160,215,0.9);
+            letter-spacing: 0.1em;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 100;
+            pointer-events: none;
+        }
+        #speed-notify.show { opacity: 1; }
+
+        /* 로딩 오버레이 */
+        #loading-overlay {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 500;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            color: rgba(0,180,255,0.8);
+            letter-spacing: 0.15em;
+            transition: opacity 0.4s ease;
+        }
+        #loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .window { animation: none; }
+        }
+
+        #screen-frame {
+            position: fixed;
+            inset: 0;
+            z-index: 999999;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #screen-frame::after {
+            content: '';
+            display: block;
+            width: 100%;
+            height: 100%;
+            background: url('trans.png') center / 100% 100% no-repeat;
+        }
+    </style>
+</head>
+<body>
+
+<!-- 배경: 웹캠 원본 영상 (미러 반전) -->
+<video id="webcam-bg" autoplay playsinline muted></video>
+<!-- 세그멘테이션용 숨김 비디오 (동일 스트림) -->
+<video id="webcam-hidden" autoplay playsinline muted></video>
+
+<div id="cursor"></div>
+<div id="screen-frame"></div>
+<div id="cursor-ring"></div>
+<div id="glitch-flash"></div>
+<div id="speed-notify"></div>
+
+<!-- 이미지 로딩 중 표시할 오버레이 -->
+<div id="loading-overlay">INITIALIZING…</div>
+
+<div id="hud">
+    <span style="display:flex;align-items:center;gap:6px;">
+        <span id="cam-dot" style="width:6px;height:6px;border-radius:50%;background:rgba(0,180,255,0.3);display:inline-block;transition:background 0.4s;"></span>
+        <span id="cam-label">PERSON&nbsp;DETECT&nbsp;OFF</span>
+    </span>
+    <span class="sep">|</span>
+    <div id="speed-bar"><div id="speed-fill" style="width:50%"></div></div>
+    <span class="sep">|</span>
+    <span>SCROLL&nbsp;speed</span>
+    <span class="sep">|</span>
+    <span style="display:flex;align-items:center;gap:6px;">
+        <span>TRACK</span>
+        <div id="track-bar"><div id="track-dot"></div></div>
+    </span>
+    <span class="sep">|</span>
+    <span>CLICK&nbsp;glitch</span>
+</div>
+
+<div class="container" id="container"></div>
+
+<script type="module">
+
+const webcamBg     = document.getElementById('webcam-bg');
+const webcamHidden = document.getElementById('webcam-hidden');
+const camDot       = document.getElementById('cam-dot');
+const camLabel     = document.getElementById('cam-label');
+const trackDot     = document.getElementById('track-dot');
+const loadingOverlay = document.getElementById('loading-overlay');
+const container    = document.getElementById('container');
+
+// ── 이미지 프리로드 ──────────────────────────────────────────
+// 브라우저 캐시에 이미지를 올려둔 뒤 터널을 시작
+async function preloadImage(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload  = () => resolve(img);
+        img.onerror = () => {
+            console.warn(`Image preload failed: ${src}`);
+            resolve(null); // 실패해도 계속 진행
+        };
+        img.src = src;
+    });
+}
+
+// ── 터널 창 생성 ──────────────────────────────────────────────
+const COUNT    = 15;
+const BASE_DUR = 2;
+
+function makeWindow(i, totalDur) {
+    const div = document.createElement('div');
+    div.className = 'window';
+    div.style.setProperty('--delay', `${-i * (totalDur / COUNT)}s`);
+    div.style.setProperty('--dur',   `${totalDur}s`);
+
+    const img = document.createElement('img');
+    img.src = './bottom.png';
+    // decoding: async → 페인트 블로킹 방지
+    img.decoding = 'async';
+    div.appendChild(img);
+    return div;
+}
+
+// ── 속도 조절 ──────────────────────────────────────────────────
+let speed = 1.0;
+const MIN_SPEED = 0.2, MAX_SPEED = 4.0;
+const speedFill = document.getElementById('speed-fill');
+const notify    = document.getElementById('speed-notify');
+let notifyTimer = null;
+let windows     = [];
+
+function applySpeed() {
+    const dur = (BASE_DUR / speed).toFixed(3);
+    windows.forEach((w, i) => {
+        w.style.setProperty('--dur',   `${dur}s`);
+        w.style.setProperty('--delay', `${-i * (parseFloat(dur) / COUNT)}s`);
+    });
+    const pct = ((speed - MIN_SPEED) / (MAX_SPEED - MIN_SPEED)) * 100;
+    speedFill.style.width = pct + '%';
+    notify.textContent = `SPEED ${speed.toFixed(1)}×`;
+    notify.classList.add('show');
+    clearTimeout(notifyTimer);
+    notifyTimer = setTimeout(() => notify.classList.remove('show'), 900);
+}
+
+window.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    speed = Math.min(MAX_SPEED, Math.max(MIN_SPEED, speed - e.deltaY * 0.003));
+    applySpeed();
+}, { passive: false });
+
+// ── 초기화: 이미지 로드 완료 후 터널 시작 ───────────────────
+async function initTunnel() {
+    // 1) 이미지 프리로드
+    await preloadImage('./bottom.png');
+
+    // 2) 모든 window 요소 생성 및 추가 (DOM insert는 한 번에)
+    const fragment = document.createDocumentFragment();
+    for (let i = 0; i < COUNT; i++) {
+        const w = makeWindow(i, BASE_DUR);
+        fragment.appendChild(w);
+        windows.push(w);
+    }
+    container.appendChild(fragment);
+
+    // 3) 두 프레임 대기: 브라우저가 레이아웃·페인트를 완료하도록
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    // 4) 터널 표시 + 로딩 오버레이 제거
+    container.classList.add('ready');
+    loadingOverlay.classList.add('hidden');
+    setTimeout(() => loadingOverlay.remove(), 500);
+}
+
+initTunnel();
+
+// ── Person Detection ──────────────────────────────────────────
+let segmenter      = null;
+let personX        = 0.5;
+let personY        = 0.4;
+let personDetected = false;
+const SMOOTH       = 0.08;
+
+function computeCentroid(maskData, mw, mh) {
+    let sumX = 0, sumY = 0, count = 0;
+    for (let i = 0; i < maskData.length; i++) {
+        if (maskData[i] === 0) {
+            sumX += (i % mw);
+            sumY += Math.floor(i / mw);
+            count++;
+        }
+    }
+    if (count < 300) return null;
+    return { x: sumX / count / mw, y: sumY / count / mh };
+}
+
+async function initDetection() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+
+        webcamBg.srcObject     = stream;
+        webcamHidden.srcObject = stream;
+
+        await Promise.all([
+            new Promise(r => { webcamBg.onloadedmetadata     = r; }),
+            new Promise(r => { webcamHidden.onloadedmetadata = r; })
+        ]);
+        webcamBg.play();
+        webcamHidden.play();
+
+        camDot.style.background = 'rgba(255,180,0,0.9)';
+        camLabel.textContent    = 'LOADING\u00a0MODEL\u2026';
+
+        const { ImageSegmenter, FilesetResolver } = await import(
+            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs'
+        );
+        const vision = await FilesetResolver.forVisionTasks(
+            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+        );
+        segmenter = await ImageSegmenter.createFromOptions(vision, {
+            baseOptions: {
+                modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+                delegate: 'GPU'
+            },
+            runningMode: 'VIDEO',
+            outputCategoryMask: true,
+            outputConfidenceMasks: false
+        });
+
+        camDot.style.background = '#00bfff';
+        camLabel.textContent    = 'PERSON\u00a0DETECT\u00a0ON';
+        segmentLoop();
+
+    } catch (err) {
+        camDot.style.background = 'rgba(255,60,60,0.8)';
+        camLabel.textContent    = 'DETECT\u00a0N/A';
+        console.warn('Person detection error:', err);
+    }
+}
+
+let lastSegTs = -1;
+
+function segmentLoop() {
+    if (webcamHidden.readyState < 2) { requestAnimationFrame(segmentLoop); return; }
+    const now = performance.now();
+    if (now === lastSegTs)           { requestAnimationFrame(segmentLoop); return; }
+    lastSegTs = now;
+
+    const result = segmenter.segmentForVideo(webcamHidden, now);
+    const mask   = result?.categoryMask;
+    if (!mask) { requestAnimationFrame(segmentLoop); return; }
+
+    const mw       = mask.width;
+    const mh       = mask.height;
+    const maskData = mask.getAsUint8Array();
+    const centroid = computeCentroid(maskData, mw, mh);
+
+    if (centroid) {
+        personDetected = true;
+        personX = 1.0 - centroid.x;
+        personY = centroid.y;
+        camDot.style.background = '#00ff88';
+    } else {
+        personDetected = false;
+        camDot.style.background = '#00bfff';
+    }
+
+    mask.close();
+    requestAnimationFrame(segmentLoop);
+}
+
+initDetection();
+
+// ── 마우스 & 커서 ──────────────────────────────────────────────
+const cursor     = document.getElementById('cursor');
+const cursorRing = document.getElementById('cursor-ring');
+let ringX   = window.innerWidth  / 2;
+let ringY   = window.innerHeight / 2;
+let mouseNX = 0.5;
+let mouseNY = 0.5;
+let curPX   = 0.5;
+let curPY   = 0.5;
+
+window.addEventListener('mousemove', (e) => {
+    cursor.style.left = e.clientX + 'px';
+    cursor.style.top  = e.clientY + 'px';
+    mouseNX = e.clientX / window.innerWidth;
+    mouseNY = e.clientY / window.innerHeight;
+});
+
+// ── 메인 애니메이션 루프 ─────────────────────────────────────
+function animateFrame() {
+    ringX += (parseFloat(cursor.style.left || window.innerWidth  / 2) - ringX) * 0.15;
+    ringY += (parseFloat(cursor.style.top  || window.innerHeight / 2) - ringY) * 0.15;
+    cursorRing.style.left = ringX + 'px';
+    cursorRing.style.top  = ringY + 'px';
+
+    let destX, destY;
+    if (personDetected) {
+        destX = 0.5 + (personX - 0.5) * 0.7;
+        destY = 0.5 + (personY - 0.5) * 0.6;
+    } else {
+        destX = 0.5 + (mouseNX - 0.5) * 0.7;
+        destY = 0.5 + (mouseNY - 0.5) * 0.7;
+    }
+
+    curPX += (destX - curPX) * (personDetected ? SMOOTH : 0.10);
+    curPY += (destY - curPY) * (personDetected ? SMOOTH : 0.10);
+
+    container.style.perspectiveOrigin = `${curPX * 100}% ${curPY * 100}%`;
+
+    if (personDetected) {
+        trackDot.style.left = `${personX * 100}%`;
+    }
+
+    requestAnimationFrame(animateFrame);
+}
+animateFrame();
+
+// ── 클릭 글리치 ───────────────────────────────────────────────
+const glitchFlash = document.getElementById('glitch-flash');
+let glitchSlices  = [];
+
+function runGlitch() {
+    glitchFlash.classList.remove('active');
+    void glitchFlash.offsetWidth;
+    glitchFlash.classList.add('active');
+
+    container.classList.remove('glitching');
+    void container.offsetWidth;
+    container.classList.add('glitching');
+    setTimeout(() => container.classList.remove('glitching'), 420);
+
+    glitchSlices.forEach(s => s.remove());
+    glitchSlices = [];
+
+    const colors = ['blue','cyan','white'];
+    const count  = 5 + Math.floor(Math.random() * 4);
+    for (let i = 0; i < count; i++) {
+        const el     = document.createElement('div');
+        const topPct = Math.random() * 90;
+        const hPct   = 1 + Math.random() * 8;
+        const shift  = (Math.random() - 0.5) * 60;
+        const color  = colors[Math.floor(Math.random() * colors.length)];
+        el.className = `glitch-slice ${color}`;
+        el.style.top       = topPct + '%';
+        el.style.height    = hPct + '%';
+        el.style.transform = `translateX(${shift}px)`;
+        el.style.opacity   = 0.5 + Math.random() * 0.4;
+        document.body.appendChild(el);
+        glitchSlices.push(el);
+        const delay    = Math.random() * 120;
+        const duration = 80 + Math.random() * 200;
+        setTimeout(() => {
+            el.style.transition = `opacity ${duration * 0.4}ms`;
+            el.style.opacity = 0;
+            setTimeout(() => el.remove(), duration * 0.4 + 50);
+        }, delay);
+    }
+
+    const shifts = [
+        `drop-shadow(${(Math.random()-0.5)*12}px 0 0 rgba(0,180,255,0.7))`,
+        `drop-shadow(${(Math.random()-0.5)*12}px 0 0 rgba(0,240,220,0.6))`
+    ];
+    container.style.filter = shifts.join(' ');
+    setTimeout(() => { container.style.filter = ''; }, 180 + Math.random() * 120);
+}
+
+window.addEventListener('mousedown', () => {
+    cursorRing.classList.add('clicking');
+    runGlitch();
+});
+window.addEventListener('mouseup', () => {
+    cursorRing.classList.remove('clicking');
+});
+
+</script>
+</body>
+</html>

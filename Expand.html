@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Layer Dive - Seamless</title>
+<style>
+  /* 기본 스타일 유지 */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: #000;
+    font-family: 'Courier New', monospace;
+  }
+  #bg {
+    position: fixed;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    pointer-events: none;
+  }
+  #top-img {
+    position: fixed;
+    cursor: pointer;
+    object-fit: cover;
+    /* transition-timing-function을 더 역동적인 베지어로 변경 */
+    will-change: transform, top, left, width, height, opacity;
+  }
+  #hint {
+    position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.4); font-size: 11px; letter-spacing: 0.2em;
+    text-transform: uppercase; z-index: 100; transition: opacity 0.6s; pointer-events: none;
+  }
+  #back {
+    position: fixed; top: 24px; left: 24px; color: rgba(255,255,255,0.5);
+    font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase;
+    z-index: 100; cursor: pointer; opacity: 0; transition: opacity 0.4s, color 0.2s; user-select: none;
+  }
+  #back:hover { color: #fff; }
+  #back.show { opacity: 1; }
+  #depth {
+    position: fixed; top: 24px; right: 24px; color: rgba(255,255,255,0.3);
+    font-size: 10px; letter-spacing: 0.2em; z-index: 100; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="bg"></div>
+<img id="top-img" src="" alt="" />
+
+<div id="hint">Click to dive deeper</div>
+<div id="back">← back</div>
+<div id="depth">0</div>
+
+<script>
+const LAYERS = [
+  { bg: 'window_1.png', img: 'window_2.png', x: 0.403, y: 0.551, w: 0.097, h: 0.129 },
+  { bg: 'window_2.png', img: 'window_3.png', x: 0.488, y: 0.540, w: 0.306, h: 0.353 },
+  { bg: 'window_3.png', img: 'window_4.png', x: 0.645, y: 0.688, w: 0.099, h: 0.184 },
+  { bg: 'window_4.png', img: 'window_5.png', x: 0.457, y: 0.356, w: 0.086, h: 0.427 },
+  { bg: 'window_5.png', img: 'window_6.png', x: 0.35, y: 0.10, w: 0.40, h: 0.60 },
+  { bg: 'window_6.png', img: 'window_7.png', x: 0.15, y: 0.20, w: 0.42, h: 0.50 },
+  { bg: 'window_7.png', img: 'window_8.png', x: 0.45, y: 0.25, w: 0.38, h: 0.48 },
+  { bg: 'window_8.png', img: 'window_9.png', x: 0.25, y: 0.15, w: 0.44, h: 0.55 },
+  { bg: 'window_9.png', img: 'window_10.png', x: 0.30, y: 0.30, w: 0.40, h: 0.45 },
+];
+
+// 더 부드럽고 묵직한 이징 (Apple 스타일)
+const EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
+const DIVE_DURATION = 1100; 
+const RISE_DURATION = 900;
+const FADE_DURATION = 400;
+
+let stack = [];
+let currentIndex = 0;
+let isAnimating = false;
+
+const bgEl = document.getElementById('bg');
+const topImg = document.getElementById('top-img');
+const hintEl = document.getElementById('hint');
+const backEl = document.getElementById('back');
+const depthEl = document.getElementById('depth');
+
+// 이미지 사전 로딩 함수
+function preload(url) {
+  if (!url) return;
+  const img = new Image();
+  img.src = url;
+}
+
+function getRect(layer) {
+  return { x: window.innerWidth * layer.x, y: window.innerHeight * layer.y, w: window.innerWidth * layer.w, h: window.innerHeight * layer.h };
+}
+
+function setStyles(el, props) {
+  Object.assign(el.style, props);
+}
+
+function init() {
+  const first = LAYERS[0];
+  bgEl.style.backgroundImage = `url('${first.bg}')`;
+  const rect = getRect(first);
+  
+  // 초기 배치
+  setStyles(topImg, {
+    transition: 'none',
+    left: rect.x + 'px',
+    top: rect.y + 'px',
+    width: rect.w + 'px',
+    height: rect.h + 'px',
+    opacity: 0
+  });
+  topImg.src = first.img;
+
+  // 등장
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      topImg.style.transition = `opacity ${FADE_DURATION * 2}ms ease`;
+      topImg.style.opacity = 1;
+      preload(LAYERS[1]?.img); // 다음 이미지 미리 로드
+    });
+  });
+}
+
+// 앞으로 들어가기
+topImg.onclick = () => {
+  if (isAnimating || currentIndex >= LAYERS.length - 1) return;
+  isAnimating = true;
+  hintEl.style.opacity = 0;
+
+  const currentLayer = LAYERS[currentIndex];
+  const nextLayer = LAYERS[currentIndex + 1];
+
+  // 1. 현재 클릭한 이미지를 화면 꽉 차게 확대
+  topImg.style.transition = `all ${DIVE_DURATION}ms ${EASE}`;
+  setStyles(topImg, {
+    left: '0px', top: '0px', width: '100vw', height: '100vh'
+  });
+
+  // 2. 애니메이션 도중 미리 로드 (성능 최적화)
+  preload(nextLayer.img);
+
+  setTimeout(() => {
+    // 3. 배경 교체 (TopImg와 동일해지는 순간)
+    bgEl.style.backgroundImage = `url('${currentLayer.img}')`;
+    
+    // 4. TopImg를 즉시 다음 레이어의 작은 이미지로 교체 (투명 상태로)
+    topImg.style.transition = 'none';
+    topImg.style.opacity = 0;
+    
+    const rect = getRect(nextLayer);
+    setStyles(topImg, {
+      left: rect.x + 'px', top: rect.y + 'px',
+      width: rect.w + 'px', height: rect.h + 'px'
+    });
+    topImg.src = nextLayer.img;
+
+    // 5. 다음 이미지 부드럽게 페이드 인
+    setTimeout(() => {
+      topImg.style.transition = `opacity ${FADE_DURATION}ms ease-out`;
+      topImg.style.opacity = 1;
+      
+      stack.push(currentIndex);
+      currentIndex++;
+      updateUI();
+      isAnimating = false;
+      
+      // 다음 레이어 미리 로드
+      if (currentIndex < LAYERS.length - 1) preload(LAYERS[currentIndex + 1].img);
+    }, 50);
+
+  }, DIVE_DURATION);
+};
+
+// 뒤로 가기
+function goBack() {
+  if (isAnimating || stack.length === 0) return;
+  isAnimating = true;
+
+  const prevIndex = stack.pop();
+  const currentLayer = LAYERS[currentIndex];
+  const prevLayer = LAYERS[prevIndex];
+
+  // 1. 현재 작은 이미지 사라짐
+  topImg.style.transition = `opacity ${FADE_DURATION / 2}ms ease-in`;
+  topImg.style.opacity = 0;
+
+  setTimeout(() => {
+    // 2. TopImg를 전체화면 크기의 현재 배경 이미지로 즉시 설정
+    topImg.style.transition = 'none';
+    topImg.src = currentLayer.bg;
+    setStyles(topImg, {
+      left: '0px', top: '0px', width: '100vw', height: '100vh', opacity: 1
+    });
+
+    // 3. 실제 배경(bgEl)을 한 단계 이전 것으로 교체
+    bgEl.style.backgroundImage = `url('${prevLayer.bg}')`;
+
+    // 4. 화면을 꽉 채웠던 이미지를 이전의 작은 크기로 축소
+    setTimeout(() => {
+      topImg.style.transition = `all ${RISE_DURATION}ms ${EASE}`;
+      const rect = getRect(prevLayer);
+      setStyles(topImg, {
+        left: rect.x + 'px', top: rect.y + 'px',
+        width: rect.w + 'px', height: rect.h + 'px'
+      });
+
+      setTimeout(() => {
+        currentIndex = prevIndex;
+        updateUI();
+        isAnimating = false;
+      }, RISE_DURATION);
+    }, 20);
+  }, FADE_DURATION / 2);
+}
+
+function updateUI() {
+  depthEl.textContent = currentIndex;
+  backEl.classList.toggle('show', stack.length > 0);
+}
+
+backEl.onclick = goBack;
+window.onkeydown = (e) => { if(e.key === 'Escape' || e.key === 'Backspace') goBack(); };
+window.onresize = () => {
+  if(isAnimating) return;
+  const rect = getRect(LAYERS[currentIndex]);
+  setStyles(topImg, { left: rect.x+'px', top: rect.y+'px', width: rect.w+'px', height: rect.h+'px' });
+};
+
+init();
+</script>
+</body>
+</html>
