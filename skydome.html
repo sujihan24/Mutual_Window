@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gesture Space — v2</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 100vw; height: 100vh; cursor: none; user-select: none; }
+
+#bg-video-wrap { position:fixed;inset:0;z-index:0;overflow:hidden;background:#000; }
+#bgVideo {
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover; transform:scaleX(-1);
+  filter: blur(6px) brightness(0.75); transition: filter 0.5s;
+}
+#bg-overlay {
+  position:absolute;inset:0;
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 0%, rgba(140,210,255,0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 50% 40% at 0% 100%, rgba(100,180,255,0.12) 0%, transparent 55%),
+    linear-gradient(180deg, rgba(60,120,200,0.08) 0%, rgba(20,60,140,0.22) 100%);
+  pointer-events:none;
+}
+#bg-overlay::after {
+  content:'';position:absolute;inset:0;
+  background: radial-gradient(ellipse 100% 100% at 50% 50%, transparent 45%, rgba(0,10,40,0.55) 100%);
+}
+#bg-overlay::before {
+  content:'';position:absolute;inset:0;
+  background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px, rgba(0,20,60,0.04) 2px, rgba(0,20,60,0.04) 3px);
+  pointer-events:none;
+}
+
+/* spotlight */
+#spotlight { position:fixed;inset:0;z-index:2;pointer-events:none;opacity:0;transition:opacity 0.4s;
+  background: radial-gradient(circle 220px at 50% 50%, transparent 0%, rgba(0,10,40,0.75) 100%); }
+#spotlight.active { opacity:1; }
+
+/* shuffle vignette */
+#shuffle-vfx {
+  position:fixed;inset:0;z-index:41;pointer-events:none;
+  box-shadow: inset 0 0 0px rgba(180,60,255,0);
+  transition: box-shadow 0.35s;
+}
+#shuffle-vfx.active {
+  box-shadow: inset 0 0 90px rgba(34, 0, 255, 0.28), inset 0 0 30px rgba(120,0,200,0.15);
+}
+
+/* particle & constellation canvases */
+#constellation-canvas { position:fixed;inset:0;z-index:44;pointer-events:none; }
+#particle-canvas      { position:fixed;inset:0;z-index:45;pointer-events:none; }
+
+#scene { position:fixed;inset:0;perspective:1400px;z-index:46; }
+#world { width:100%;height:100%;transform-style:preserve-3d;position:relative; }
+
+/* image card */
+.win {
+  position:absolute; border-radius:0;
+  transform-style:preserve-3d; cursor:none; overflow:hidden; height:auto;
+  box-shadow: 0 8px 40px rgba(0,10,40,0.45), 0 2px 10px rgba(0,10,40,0.25);
+  transition: box-shadow 0.25s, filter 0.2s;
+}
+.win.grabbed {
+  box-shadow: 0 24px 72px rgba(60,120,200,0.55), 0 8px 20px rgba(60,100,180,0.35), 0 0 0 2px rgba(120,190,255,0.5);
+  z-index:500!important;
+}
+.win.spotlit {
+  box-shadow: 0 0 0 1px rgba(0, 76, 255, 0.95), 0 0 36px rgba(0, 200, 255, 0.8), 0 20px 60px rgba(60,120,200,0.45);
+  z-index:400!important;
+}
+.win.crumpled {
+  filter: contrast(1.2) brightness(0.82) saturate(1.4) !important;
+}
+.win-img {
+  width:100%; height:auto; display:block; border-radius:0; pointer-events:none;
+  transition: opacity 0.35s ease;
+}
+.win.dissolving .win-img, .win.dissolved .win-img { opacity: 0; }
+.win.intact .win-img { opacity: 1; }
+
+/* gesture badge */
+#gesture-badge { display:none; }
+
+/* cursor */
+#cursor {
+  position:fixed; width:120px; height:120px;
+  pointer-events:none; z-index:9999; left:-100px; top:-100px;
+  transform:translate(-50%,-50%);
+  transition:width .15s, height .15s, filter .15s, opacity .15s;
+}
+#cursor img {
+  width:100%; height:100%; object-fit:contain; display:block;
+  transition: opacity 0.12s ease;
+}
+#cursor.scanning {
+  animation:scanPulse 1.4s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgba(255,255,255,0.7));
+}
+@keyframes scanPulse {
+  0%,100% { filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.35)); }
+  50%     { filter: drop-shadow(0 0 14px rgba(255,255,255,0.95)); }
+}
+#cursor.pinch    { width:114px; height:114px; }
+#cursor.pointing { width:108px; height:108px; }
+#cursor.peace    { width:108px; height:108px; }
+#cursor.open     { width:120px; height:120px; }
+#cursor.fist     { width:108px; height:108px; }
+
+/* ═══════════════════════════════════════════════
+   TUTORIAL OVERLAY
+   ═══════════════════════════════════════════════ */
+#tutorial-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 5, 25, 0.45);
+  backdrop-filter: blur(12px) saturate(1.3);
+  -webkit-backdrop-filter: blur(12px) saturate(1.3);
+  opacity: 1;
+  transition: opacity 0.6s ease, visibility 0.6s ease;
+}
+#tutorial-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Animated scan line on overlay */
+#tutorial-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 3px,
+    rgba(80, 160, 255, 0.018) 3px,
+    rgba(80, 160, 255, 0.018) 4px
+  );
+  pointer-events: none;
+  animation: scanlines 8s linear infinite;
+}
+@keyframes scanlines {
+  0%   { background-position: 0 0; }
+  100% { background-position: 0 100px; }
+}
+
+/* Radial glow behind card */
+#tutorial-overlay::after {
+  content: '';
+  position: absolute;
+  width: 800px;
+  height: 600px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(60, 120, 255, 0.10) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+/* Win7 window wrapper — glassmorphism */
+#tutorial-card {
+  position: relative;
+  z-index: 1;
+  width: min(1280px, 96vw);
+  border-radius: 8px 8px 4px 4px;
+  background: rgba(20, 34, 72, 0.28);
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  border: 1px solid rgba(140, 190, 255, 0.28);
+  box-shadow:
+    0 0 0 1px rgba(10, 30, 80, 0.5),
+    0 24px 64px rgba(0, 10, 40, 0.45),
+    inset 0 1px 0 rgba(200, 230, 255, 0.22),
+    inset 1px 0 0 rgba(140, 190, 255, 0.07),
+    inset -1px 0 0 rgba(140, 190, 255, 0.07);
+  animation: cardReveal 0.25s ease both;
+  overflow: hidden;
+}
+@keyframes cardReveal {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Win7 title bar — glass tint */
+#tutorial-card::before {
+  content: 'Gesture Space';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  color: rgba(255,255,255,0.90);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+  letter-spacing: 0.01em;
+  background:
+    linear-gradient(180deg,
+      rgba(74, 130, 210, 0.55) 0%,
+      rgba(48, 100, 185, 0.45) 50%,
+      rgba(36, 84, 168, 0.50) 51%,
+      rgba(52, 108, 192, 0.42) 100%
+    );
+  border-bottom: 1px solid rgba(80, 140, 255, 0.3);
+  box-shadow:
+    inset 0 1px 0 rgba(180, 220, 255, 0.25),
+    0 1px 0 rgba(0,0,0,0.15);
+  pointer-events: none;
+  z-index: 2;
+}
+
+
+
+
+
+/* Content body below title bar */
+.card-body {
+  padding: 64px 60px 52px;
+  background: transparent;
+  border-top: 1px solid rgba(100, 160, 255, 0.1);
+}
+
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Gesture grid */
+.gesture-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 24px;
+  margin-bottom: 52px;
+}
+
+.gesture-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 30px 18px 26px;
+  border-radius: 0;
+  border: 1px solid rgba(80, 140, 220, 0.18);
+  border-top: 1px solid rgba(140, 190, 255, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  box-shadow: inset 0 1px 0 rgba(180,220,255,0.07);
+  transition: border-color 0.15s, background 0.15s;
+  cursor: default;
+  animation: fadeSlideUp 0.4s both;
+}
+.gesture-item:nth-child(1) { animation-delay: 0.05s; }
+.gesture-item:nth-child(2) { animation-delay: 0.12s; }
+.gesture-item:nth-child(3) { animation-delay: 0.19s; }
+.gesture-item:nth-child(4) { animation-delay: 0.26s; }
+.gesture-item:nth-child(5) { animation-delay: 0.33s; }
+
+.gesture-item:hover {
+  border-color: rgba(120, 190, 255, 0.4);
+  background: linear-gradient(180deg,
+    rgba(80, 140, 255, 0.10) 0%,
+    rgba(40, 90, 200, 0.06) 100%
+  );
+}
+
+.gesture-icon-wrap {
+  width: 110px;
+  height: 110px;
+  border-radius: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: rgba(0,0,0,0.14);
+  border: 1px solid rgba(80,130,220,0.2);
+  border-top: 1px solid rgba(140,190,255,0.15);
+  flex-shrink: 0;
+}
+.gesture-icon-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.gesture-label {
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: rgba(120, 190, 255, 0.85);
+  text-align: center;
+  line-height: 1.3;
+}
+.gesture-desc {
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: rgba(200, 225, 255, 0.62);
+  text-align: center;
+  line-height: 1.45;
+}
+
+/* Accent dot per gesture */
+.gesture-item:nth-child(1) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(80, 200, 255, 0.12); }
+.gesture-item:nth-child(2) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(255, 210, 50, 0.12); }
+.gesture-item:nth-child(3) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(60, 220, 120, 0.12); }
+.gesture-item:nth-child(4) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(180, 50, 255, 0.12); }
+.gesture-item:nth-child(5) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(255, 100, 50, 0.12); }
+
+/* Win7-style divider */
+.tutorial-divider {
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent,
+    rgba(100,160,255,0.3) 20%,
+    rgba(160,210,255,0.5) 50%,
+    rgba(100,160,255,0.3) 80%,
+    transparent
+  );
+  margin-bottom: 32px;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.2);
+}
+
+/* Start button — Windows 7 Aero */
+.tutorial-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#start-btn {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  outline: none;
+  overflow: hidden;
+
+  /* Aero glass layered background */
+  background:
+    linear-gradient(180deg,
+      rgba(255,255,255,0.28) 0%,
+      rgba(255,255,255,0.10) 49%,
+      rgba(255,255,255,0.00) 50%,
+      rgba(255,255,255,0.06) 100%
+    ),
+    linear-gradient(180deg,
+      rgba(74,138,210,1) 0%,
+      rgba(48,106,186,1) 49%,
+      rgba(30,84,165,1)  50%,
+      rgba(50,112,196,1) 100%
+    );
+
+  /* Aero outer glow + inset rim */
+  box-shadow:
+    0 0 0 1px rgba(14, 52, 120, 0.95),
+    0 0 0 2px rgba(108, 168, 230, 0.5),
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    0 2px 6px rgba(0,0,0,0.4),
+    0 1px 2px rgba(0,0,0,0.3);
+
+  transition: filter 0.1s, box-shadow 0.1s;
+}
+
+#start-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+}
+
+/* Top gloss shine */
+#start-btn::before {
+  content: '';
+  position: absolute;
+  top: 1px; left: 4px; right: 4px;
+  height: 45%;
+  background: linear-gradient(180deg,
+    rgba(255,255,255,0.45) 0%,
+    rgba(255,255,255,0.12) 100%
+  );
+  border-radius: 0;
+  pointer-events: none;
+}
+
+#start-btn:hover {
+  filter: brightness(1.1);
+  box-shadow:
+    0 0 0 1px rgba(14, 52, 120, 0.95),
+    0 0 0 2px rgba(140, 195, 245, 0.7),
+    inset 0 1px 0 rgba(255,255,255,0.4),
+    0 2px 8px rgba(0,0,0,0.45),
+    0 0 14px rgba(80,150,255,0.3);
+}
+
+#start-btn:active {
+  filter: brightness(0.93);
+  box-shadow:
+    0 0 0 1px rgba(14, 52, 120, 0.95),
+    0 0 0 2px rgba(108, 168, 230, 0.5),
+    inset 0 2px 4px rgba(0,0,0,0.25),
+    0 1px 2px rgba(0,0,0,0.3);
+  transform: translateY(1px);
+}
+
+#back-btn {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 100;
+  width: 44px;
+  height: 44px;
+  opacity: 0.85;
+  transition: opacity 0.2s, transform 0.2s;
+}
+#back-btn:hover {
+  opacity: 1;
+  transform: scale(1.08);
+}
+#back-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* Remove old pulse ring */
+#start-btn::after { display: none; }
+</style>
+</head>
+<body>
+
+  <a id="back-btn" href="iconlayout.html">
+    <img src="backbutton.png">
+  </a>
+
+<!-- ── TUTORIAL OVERLAY ─────────────────────────────── -->
+<div id="tutorial-overlay">
+  <div id="tutorial-card">
+    <div class="card-body">
+
+    <div class="gesture-grid">
+      <div class="gesture-item">
+        <div class="gesture-icon-wrap">
+          <img src="hi_1.png" alt="Pinch gesture">
+        </div>
+        <div class="gesture-label">Pinch</div>
+        <div class="gesture-desc">Grab and move cards</div>
+      </div>
+      <div class="gesture-item">
+        <div class="gesture-icon-wrap">
+          <img src="hi_2.png" alt="Pointing gesture">
+        </div>
+        <div class="gesture-label">Point</div>
+        <div class="gesture-desc">Spotlight a card</div>
+      </div>
+      <div class="gesture-item">
+        <div class="gesture-icon-wrap">
+          <img src="hi_3.png" alt="Peace gesture">
+        </div>
+        <div class="gesture-label">Peace</div>
+        <div class="gesture-desc">Spawn a new image</div>
+      </div>
+      <div class="gesture-item">
+        <div class="gesture-icon-wrap">
+          <img src="hi_4.png" alt="Fist gesture">
+        </div>
+        <div class="gesture-label">Fist</div>
+        <div class="gesture-desc">Shuffle all cards</div>
+      </div>
+      <div class="gesture-item">
+        <div class="gesture-icon-wrap">
+          <img src="hi_5.png" alt="Open Hand gesture">
+        </div>
+        <div class="gesture-label">Open</div>
+        <div class="gesture-desc">Dissolve into particles</div>
+      </div>
+    </div>
+
+    <div class="tutorial-divider"></div>
+
+    <div class="tutorial-footer">
+      <button id="start-btn">
+        <img src="hi_2.png" alt="Point to start">
+      </button>
+    </div>
+
+    </div><!-- /card-body -->
+  </div>
+</div>
+
+<!-- ── MAIN SCENE ───────────────────────────────────── -->
+<div id="bg-video-wrap">
+  <video id="bgVideo" playsinline autoplay muted></video>
+  <div id="bg-overlay"></div>
+</div>
+<div id="spotlight"></div>
+<div id="shuffle-vfx"></div>
+<canvas id="constellation-canvas"></canvas>
+<canvas id="particle-canvas"></canvas>
+<div id="scene"><div id="world"></div></div>
+
+<div id="gesture-badge">
+  <span class="badge-emoji" id="badge-emoji"></span>
+  <div class="badge-name" id="badge-name">Peace</div>
+  <div class="badge-desc" id="badge-desc">Connect constellation</div>
+</div>
+
+<canvas id="camCanvas" style="display:none"></canvas>
+
+<div id="cursor">
+  <img id="cursor-img" src="" alt="cursor">
+</div>
+
+<script type="module">
+import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+// ── Tutorial close ───────────────────────────────────────────────────────
+const tutorialOverlay = document.getElementById('tutorial-overlay');
+const startBtn        = document.getElementById('start-btn');
+
+function closeTutorial() {
+  if (!tutorialOverlay.classList.contains('hidden')) {
+    tutorialOverlay.classList.add('hidden');
+  }
+}
+
+startBtn.addEventListener('click', closeTutorial);
+// Also close on Enter key
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') closeTutorial();
+});
+
+// ── DOM ─────────────────────────────────────────────────────────────────
+const world       = document.getElementById('world');
+const cursor      = document.getElementById('cursor');
+const bgVideo     = document.getElementById('bgVideo');
+const video       = bgVideo;
+const camCanvas   = document.getElementById('camCanvas');
+const camCtx      = camCanvas.getContext('2d');
+const spotlight   = document.getElementById('spotlight');
+const badge       = document.getElementById('gesture-badge');
+const shuffleVfx  = document.getElementById('shuffle-vfx');
+const pCanvas     = document.getElementById('particle-canvas');
+const pCtx        = pCanvas.getContext('2d');
+const cCanvas     = document.getElementById('constellation-canvas');
+const cCtx        = cCanvas.getContext('2d');
+
+// ── Core state ───────────────────────────────────────────────────────────
+let handLandmarker, lastVideoTime = -1;
+let isPinching = false, isFist = false, isOpen = false;
+let prevHandX = null, prevHandY = null;
+let spotlitEl = null, prevGesture = 'none', badgeTimer = null;
+let grabbedWin = null, grabOffsetX = 0, grabOffsetY = 0;
+
+// ── Shuffle state ────────────────────────────────────────────────────────
+let isShuffling = false;
+let shuffleFrame = 0;
+
+// ── Constellation ────────────────────────────────────────────────────────
+let constellActive = false;
+let constellTime   = 0;
+
+// ── Palettes ─────────────────────────────────────────────────────────────
+const PALETTES = [
+  ['#ff6b9d','#ffb3cc','#ff8fab'],  ['#74c0fc','#a5d8ff','#4dabf7'],
+  ['#69db7c','#b2f2bb','#51cf66'],  ['#ffa94d','#ffd8a8','#ff922b'],
+  ['#da77f2','#f3d9fa','#cc5de8'],  ['#63e6be','#c3fae8','#38d9a9'],
+  ['#ff8787','#ffc9c9','#fa5252'],  ['#74c0fc','#dbe4ff','#339af0'],
+  ['#a9e34b','#d8f5a2','#94d82d'],  ['#ffd43b','#fff3bf','#fcc419'],
+];
+
+// ── Image windows ────────────────────────────────────────────────────────
+const wins = [
+  { title:'Image 01', img:'wd_1.png', w:380, x:80,   y:70,  vx:0.18,  vy:0.14,  rotZ:-3 },
+  { title:'Image 02', img:'wd_2.png', w:360, x:500,  y:55,  vx:-0.14, vy:0.20,  rotZ:2  },
+  { title:'Image 03', img:'wd_3.png', w:400, x:900,  y:90,  vx:0.12,  vy:-0.18, rotZ:-1 },
+  { title:'Image 04', img:'wd_4.png', w:350, x:1200, y:75,  vx:-0.20, vy:0.15,  rotZ:4  },
+  { title:'Image 05', img:'wd_5.png', w:380, x:120,  y:420, vx:0.22,  vy:-0.12, rotZ:1  },
+  { title:'Image 06', img:'wd_6.png', w:370, x:540,  y:400, vx:-0.16, vy:0.22,  rotZ:-2 },
+  { title:'Image 07', img:'wd_7.png', w:400, x:950,  y:380, vx:0.15,  vy:0.20,  rotZ:3  },
+  { title:'Image 08', img:'wd_8.png', w:360, x:70,   y:700, vx:0.20,  vy:-0.20, rotZ:2  },
+  { title:'Image 09', img:'wd_9.png', w:380, x:460,  y:680, vx:-0.22, vy:0.16,  rotZ:-3 },
+  { title:'Image 10', img:'wd_10.png', w:370, x:850, y:650, vx:0.16, vy:-0.24, rotZ:5 },
+];
+
+const winEls = [];
+const pState    = [];
+const pSampled  = [];
+const pData     = [];
+
+// ── Build windows ────────────────────────────────────────────────────────
+function createWindows() {
+  wins.forEach((d, i) => {
+    const el = document.createElement('div');
+    el.className = 'win intact';
+    el.style.cssText = `width:${d.w}px;left:${d.x}px;top:${d.y}px;z-index:${10+i};`;
+    el.dataset.index = i;
+    el.innerHTML = d.img
+      ? `<img class="win-img" src="${d.img}" alt="${d.title}" draggable="false" crossorigin="anonymous">`
+      : `<div class="win-img" style="height:200px;background:rgba(180,210,240,0.3);display:flex;align-items:center;justify-content:center;font-size:11px;color:rgba(80,120,180,0.7);font-weight:700;">No image</div>`;
+    const z = Math.sin(i * 0.7) * 65;
+    el.style.transform = `translateZ(${z}px) rotateZ(${d.rotZ}deg)`;
+    world.appendChild(el);
+    winEls.push(el);
+    d.el = el; d.cx = d.x; d.cy = d.y; d.zPhase = i * 0.6;
+    pState[i]   = 'intact';
+    pSampled[i] = false;
+    pData[i]    = [];
+  });
+}
+
+// ── Canvas resize ────────────────────────────────────────────────────────
+function resizeCanvases() {
+  pCanvas.width = cCanvas.width = window.innerWidth;
+  pCanvas.height = cCanvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvases);
+resizeCanvases();
+
+// ── Float / animate windows ──────────────────────────────────────────────
+function floatWindows() {
+  const W = window.innerWidth, H = window.innerHeight;
+  wins.forEach((d, i) => {
+    if (d.el === grabbedWin) return;
+    const elH = d.el.offsetHeight || 200;
+    d.cx += d.vx;
+    d.cy += d.vy;
+    if (d.cx < 0 || d.cx > W - d.w) d.vx *= -1;
+    if (d.cy < 0 || d.cy > H - elH) d.vy *= -1;
+    d.cx = Math.max(0, Math.min(W - d.w, d.cx));
+    d.cy = Math.max(0, Math.min(H - elH, d.cy));
+    d.zPhase += 0.004;
+    const z    = Math.sin(d.zPhase) * 65;
+    const rotZ = d.rotZ;
+    d.el.style.left      = d.cx + 'px';
+    d.el.style.top       = d.cy + 'px';
+    d.el.style.transform = `translateZ(${z}px) rotateZ(${rotZ}deg)`;
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// PARTICLE SYSTEM
+// ══════════════════════════════════════════════════════════════════════════
+function sampleWindow(idx) {
+  if (pSampled[idx]) return;
+  const d   = wins[idx];
+  const el  = d.el;
+  const imgEl = el.querySelector('img.win-img');
+  const W   = el.offsetWidth  || d.w;
+  const H   = el.offsetHeight || 200;
+  const STEP = 9;
+  pData[idx] = [];
+
+  let pixelSampled = false;
+  if (imgEl && imgEl.complete && imgEl.naturalWidth > 0) {
+    try {
+      const offscreen = document.createElement('canvas');
+      offscreen.width  = W;
+      offscreen.height = H;
+      const oct = offscreen.getContext('2d');
+      oct.drawImage(imgEl, 0, 0, W, H);
+      const data = oct.getImageData(0, 0, W, H).data;
+      for (let y = STEP / 2; y < H; y += STEP) {
+        for (let x = STEP / 2; x < W; x += STEP) {
+          const pi = (Math.floor(y) * W + Math.floor(x)) * 4;
+          const r = data[pi], g = data[pi+1], b = data[pi+2], a = data[pi+3];
+          if (a < 60) continue;
+          pData[idx].push({ lx: x, ly: y, ox: x, oy: y, vx: 0, vy: 0,
+            color: `rgb(${r},${g},${b})`, size: STEP * 0.95, alpha: a / 255 });
+        }
+      }
+      pixelSampled = pData[idx].length > 0;
+    } catch(e) {}
+  }
+
+  if (!pixelSampled) {
+    const pal = PALETTES[idx % PALETTES.length];
+    for (let y = STEP / 2; y < H; y += STEP) {
+      for (let x = STEP / 2; x < W; x += STEP) {
+        pData[idx].push({ lx: x, ly: y, ox: x, oy: y, vx: 0, vy: 0,
+          color: pal[Math.floor(Math.random() * pal.length)], size: STEP * 0.85, alpha: 0.9 });
+      }
+    }
+  }
+  pSampled[idx] = true;
+}
+
+function startDissolve(idx) {
+  if (pState[idx] === 'dissolving' || pState[idx] === 'dissolved') return;
+  sampleWindow(idx);
+  const el  = wins[idx].el;
+  const W   = el.offsetWidth  || wins[idx].w;
+  const H   = el.offsetHeight || 200;
+  const cx  = W / 2, cy = H / 2;
+  pState[idx] = 'dissolving';
+  el.classList.replace('intact', 'dissolving');
+  pData[idx].forEach(p => {
+    p.ox = p.lx; p.oy = p.ly;
+    const angle = Math.atan2(p.ly - cy, p.lx - cx) + (Math.random() - 0.5) * 2.2;
+    const speed = 4 + Math.random() * 13;
+    p.vx = Math.cos(angle) * speed;
+    p.vy = Math.sin(angle) * speed;
+  });
+}
+
+function startReassemble(idx) {
+  if (pState[idx] === 'intact' || pState[idx] === 'reassembling') return;
+  pState[idx] = 'reassembling';
+  const el = wins[idx].el;
+  el.classList.remove('dissolved');
+  el.classList.replace('dissolving', 'reassembling');
+  pData[idx].forEach(p => { p.vx *= 0.1; p.vy *= 0.1; });
+}
+
+function updateParticles() {
+  pCtx.clearRect(0, 0, pCanvas.width, pCanvas.height);
+  wins.forEach((d, idx) => {
+    const state = pState[idx];
+    if (state === 'intact') return;
+    const el   = d.el;
+    const rect = el.getBoundingClientRect();
+    const W    = el.offsetWidth  || d.w;
+    const H    = el.offsetHeight || 200;
+    const ps   = pData[idx];
+
+    if (state === 'dissolving') {
+      let allFar = true;
+      ps.forEach(p => {
+        p.ox += p.vx; p.oy += p.vy;
+        p.vx *= 0.93; p.vy *= 0.93;
+        if (Math.hypot(p.ox - p.lx, p.oy - p.ly) < 100) allFar = false;
+        drawParticle(rect.left + p.ox, rect.top + p.oy, p);
+      });
+      if (allFar) {
+        pState[idx] = 'dissolved';
+        el.classList.replace('dissolving', 'dissolved');
+      }
+    } else if (state === 'dissolved') {
+      ps.forEach(p => {
+        p.ox += (Math.random() - 0.5) * 0.7 + p.vx * 0.05;
+        p.oy += (Math.random() - 0.5) * 0.7 + p.vy * 0.05;
+        p.vx *= 0.96; p.vy *= 0.96;
+        drawParticle(rect.left + p.ox, rect.top + p.oy, p);
+      });
+    } else if (state === 'reassembling') {
+      let allHome = true;
+      ps.forEach(p => {
+        const dx = p.lx - p.ox, dy = p.ly - p.oy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1.2) {
+          p.ox += dx * 0.09; p.oy += dy * 0.09; allHome = false;
+        } else { p.ox = p.lx; p.oy = p.ly; }
+        drawParticle(rect.left + p.ox, rect.top + p.oy, p);
+      });
+      if (allHome) {
+        pState[idx] = 'intact';
+        el.className = el.className.replace('reassembling','').trim();
+        el.classList.add('intact');
+      }
+    }
+  });
+}
+
+function drawParticle(sx, sy, p) {
+  const s = p.size * 0.92;
+  pCtx.globalAlpha = p.alpha * 0.3;
+  pCtx.fillStyle   = p.color;
+  pCtx.fillRect(sx - s, sy - s, s * 2, s * 2);
+  pCtx.globalAlpha = p.alpha * 0.92;
+  pCtx.fillStyle   = p.color;
+  pCtx.fillRect(sx - s * 0.55, sy - s * 0.55, s * 1.1, s * 1.1);
+  pCtx.globalAlpha = 1;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// CONSTELLATION
+// ══════════════════════════════════════════════════════════════════════════
+function drawConstellation() {
+  cCtx.clearRect(0, 0, cCanvas.width, cCanvas.height);
+  if (!constellActive) return;
+  constellTime += 0.04;
+  const centers = wins.map(d => ({
+    x: d.cx + d.w / 2,
+    y: d.cy + (d.el?.offsetHeight || 200) / 2,
+  }));
+  const MAX_DIST = 520;
+  cCtx.save();
+  for (let i = 0; i < centers.length; i++) {
+    for (let j = i + 1; j < centers.length; j++) {
+      const dist = Math.hypot(centers[i].x - centers[j].x, centers[i].y - centers[j].y);
+      if (dist > MAX_DIST) continue;
+      const t     = 1 - dist / MAX_DIST;
+      const alpha = t * (0.45 + 0.25 * Math.sin(constellTime + i * 0.7));
+      const grad  = cCtx.createLinearGradient(centers[i].x, centers[i].y, centers[j].x, centers[j].y);
+      grad.addColorStop(0,   `rgba(160,220,255,${alpha})`);
+      grad.addColorStop(0.5, `rgba(220,240,255,${alpha * 1.3})`);
+      grad.addColorStop(1,   `rgba(160,220,255,${alpha})`);
+      cCtx.strokeStyle    = grad;
+      cCtx.lineWidth      = 1 + t * 0.8;
+      cCtx.setLineDash([6, 10]);
+      cCtx.lineDashOffset = -constellTime * 22;
+      cCtx.beginPath();
+      cCtx.moveTo(centers[i].x, centers[i].y);
+      cCtx.lineTo(centers[j].x, centers[j].y);
+      cCtx.stroke();
+    }
+  }
+  cCtx.restore();
+  cCtx.setLineDash([]);
+  centers.forEach((c, i) => {
+    const pulse  = 0.65 + 0.35 * Math.sin(constellTime * 1.8 + i * 1.1);
+    const grd = cCtx.createRadialGradient(c.x, c.y, 0, c.x, c.y, 18 * pulse);
+    grd.addColorStop(0,   `rgba(200,235,255,${0.7 * pulse})`);
+    grd.addColorStop(1,   `rgba(100,180,255,0)`);
+    cCtx.fillStyle = grd;
+    cCtx.beginPath();
+    cCtx.arc(c.x, c.y, 18 * pulse, 0, Math.PI * 2);
+    cCtx.fill();
+    cCtx.fillStyle = `rgba(230,245,255,${0.95 * pulse})`;
+    cCtx.beginPath();
+    cCtx.arc(c.x, c.y, 4 * pulse, 0, Math.PI * 2);
+    cCtx.fill();
+    drawSparkle(c.x, c.y, 9 * pulse, `rgba(200,235,255,${0.6 * pulse})`);
+  });
+}
+
+function drawSparkle(x, y, r, color) {
+  cCtx.strokeStyle = color;
+  cCtx.lineWidth   = 1;
+  cCtx.beginPath();
+  cCtx.moveTo(x - r, y); cCtx.lineTo(x + r, y);
+  cCtx.moveTo(x, y - r); cCtx.lineTo(x, y + r);
+  cCtx.stroke();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SHUFFLE
+// ══════════════════════════════════════════════════════════════════════════
+function activateShuffle() {
+  if (isShuffling) return;
+  isShuffling = true;
+  shuffleVfx.classList.add('active');
+  wins.forEach(d => {
+    d.el.classList.add('crumpled');
+    d.vx = (Math.random() - 0.5) * 5;
+    d.vy = (Math.random() - 0.5) * 5;
+  });
+}
+
+function deactivateShuffle() {
+  if (!isShuffling) return;
+  isShuffling = false;
+  shuffleVfx.classList.remove('active');
+  wins.forEach(d => {
+    d.el.classList.remove('crumpled');
+    d.vx = (d.vx > 0 ? 1 : -1) * (0.1 + Math.random() * 0.25);
+    d.vy = (d.vy > 0 ? 1 : -1) * (0.1 + Math.random() * 0.25);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SPOTLIGHT
+// ══════════════════════════════════════════════════════════════════════════
+function doSpotlight(hx, hy) {
+  spotlight.style.background = `radial-gradient(circle 250px at ${hx}px ${hy}px, transparent 0%, rgba(0,20,60,0.6) 100%)`;
+  spotlight.classList.add('active');
+  let best = null, bestDist = Infinity;
+  wins.forEach(d => {
+    const dist = Math.hypot((d.cx + d.w / 2) - hx, (d.cy + (d.el?.offsetHeight || 200) / 2) - hy);
+    if (dist < bestDist) { bestDist = dist; best = d.el; }
+  });
+  if (spotlitEl && spotlitEl !== best) spotlitEl.classList.remove('spotlit');
+  if (best) { best.classList.add('spotlit'); spotlitEl = best; }
+}
+
+function clearSpotlight() {
+  spotlight.classList.remove('active');
+  if (spotlitEl) { spotlitEl.classList.remove('spotlit'); spotlitEl = null; }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// BADGE
+// ══════════════════════════════════════════════════════════════════════════
+function showBadge() {}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SVG HAND CURSOR
+// ══════════════════════════════════════════════════════════════════════════
+const CURSOR_IMGS = {
+  default:  'hi_3.png',
+  pinch:    'hi_3.png',
+  pointing: 'hi_2.png',
+  peace:    'hi_4.png',
+  fist:     'hi_1.png',
+  open:     'hi_5.png',
+};
+
+const cursorImg = document.getElementById('cursor-img');
+let _lastCursorSrc = '';
+function updateCursorSVG(gesture) {
+  const src = CURSOR_IMGS[gesture] || CURSOR_IMGS.default;
+  if (src !== _lastCursorSrc) {
+    cursorImg.src = src;
+    _lastCursorSrc = src;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// HAND SKELETON
+// ══════════════════════════════════════════════════════════════════════════
+function drawHand(lms) {
+  camCtx.clearRect(0, 0, camCanvas.width, camCanvas.height);
+  if (!lms || !lms.length) return;
+  const lm = lms[0], W = camCanvas.width, H = camCanvas.height;
+  const conns = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
+                 [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+  camCtx.strokeStyle = 'rgba(80,180,255,0.85)'; camCtx.lineWidth = 1.5;
+  conns.forEach(([a,b]) => {
+    camCtx.beginPath();
+    camCtx.moveTo((1 - lm[a].x) * W, lm[a].y * H);
+    camCtx.lineTo((1 - lm[b].x) * W, lm[b].y * H);
+    camCtx.stroke();
+  });
+  lm.forEach((p, i) => {
+    camCtx.beginPath();
+    camCtx.arc((1 - p.x) * W, p.y * H, i === 0 ? 5 : 3, 0, Math.PI * 2);
+    camCtx.fillStyle = i === 0 ? '#ff4d9a' : 'rgba(120,200,255,0.9)';
+    camCtx.fill();
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// GESTURE DETECTION
+// ══════════════════════════════════════════════════════════════════════════
+function detectGestures(lms) {
+  if (!lms || !lms.length) {
+    isPinching = false; isFist = false; isOpen = false;
+    prevHandX = null; prevHandY = null;
+    clearSpotlight();
+    cursor.className = 'scanning'; updateCursorSVG('default');
+    wins.forEach((_, i) => { if (pState[i] === 'dissolved' || pState[i] === 'dissolving') startReassemble(i); });
+    if (isShuffling) deactivateShuffle();
+    constellActive = false;
+    return;
+  }
+
+  const lm = lms[0];
+  const pinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+  const PINCH_ON  = 0.10, PINCH_OFF = 0.13;
+  const newPinch  = isPinching ? pinchDist < PINCH_OFF : pinchDist < PINCH_ON;
+
+  let px, py;
+  if (newPinch) {
+    px = (1 - (lm[4].x + lm[8].x) / 2) * window.innerWidth;
+    py = ((lm[4].y + lm[8].y) / 2) * window.innerHeight;
+  } else {
+    px = (1 - lm[9].x) * window.innerWidth;
+    py = lm[9].y * window.innerHeight;
+  }
+  cursor.style.left = px + 'px';
+  cursor.style.top  = py + 'px';
+
+  const indexExt  = lm[8].y  < lm[6].y  - 0.02;
+  const middleExt = lm[12].y < lm[10].y - 0.02;
+  const ringExt   = lm[16].y < lm[14].y - 0.02;
+  const pinkyExt  = lm[20].y < lm[18].y - 0.02;
+
+  const tips = [8,12,16,20], mids = [6,10,14,18];
+  let curled = 0, ext = 0;
+  tips.forEach((t, i) => { if (lm[t].y > lm[mids[i]].y) curled++; else if (lm[t].y < lm[mids[i]].y - 0.02) ext++; });
+  const newFist = curled >= 3 && !newPinch;
+  const newOpen = ext >= 3;
+  const isPoint = indexExt && !middleExt && !ringExt && !pinkyExt && !newPinch;
+  const isPeace = indexExt && middleExt  && !ringExt && !pinkyExt && !newPinch;
+
+  const palmX = (1 - lm[9].x) * window.innerWidth;
+  const palmY = lm[9].y * window.innerHeight;
+
+  if (newPinch) {
+    cursor.className = 'pinch'; updateCursorSVG('pinch');
+    if (!isPinching) {
+      grabbedWin = findWinAt(px, py);
+      if (grabbedWin) {
+        grabOffsetX = px - parseFloat(grabbedWin.style.left);
+        grabOffsetY = py - parseFloat(grabbedWin.style.top);
+        grabbedWin.classList.add('grabbed');
+        grabbedWin.style.zIndex = 500;
+      }
+    } else if (grabbedWin) {
+      const nx = px - grabOffsetX, ny = py - grabOffsetY;
+      grabbedWin.style.left = nx + 'px'; grabbedWin.style.top = ny + 'px';
+      const idx = parseInt(grabbedWin.dataset.index);
+      wins[idx].cx = nx; wins[idx].cy = ny;
+    }
+  } else {
+    if (isPinching && grabbedWin) {
+      grabbedWin.classList.remove('grabbed');
+      grabbedWin.style.zIndex = 10;
+      grabbedWin = null;
+    }
+  }
+
+  if (newOpen && !newFist && !newPinch) {
+    cursor.className = 'open'; updateCursorSVG('open');
+    const RADIUS = 320;
+    wins.forEach((d, i) => {
+      const cx = d.cx + d.w / 2, cy = d.cy + (d.el?.offsetHeight || 200) / 2;
+      if (Math.hypot(cx - palmX, cy - palmY) < RADIUS) {
+        if (pState[i] === 'intact') startDissolve(i);
+      }
+    });
+  } else {
+    wins.forEach((_, i) => {
+      if (pState[i] === 'dissolved' || pState[i] === 'dissolving') startReassemble(i);
+    });
+  }
+
+  if (newFist && !newPinch) {
+    cursor.className = 'fist'; updateCursorSVG('fist');
+    if (!isShuffling) activateShuffle();
+  } else {
+    if (isShuffling) deactivateShuffle();
+  }
+
+  if (isPoint) {
+    cursor.className = 'pointing'; updateCursorSVG('pointing');
+    closeTutorial();
+    doSpotlight(px, py);
+  } else if (!newOpen && !newFist && !newPinch && !isPeace) {
+    clearSpotlight();
+  }
+
+  if (isPeace && !newFist) {
+    cursor.className = 'peace'; updateCursorSVG('peace');
+    if (prevGesture !== 'peace') spawnNextImage();
+  }
+
+  isPinching = newPinch; isFist = newFist; isOpen = newOpen;
+  prevGesture = newPinch ? 'pinch' : isPeace ? 'peace' : isPoint ? 'point' : newFist ? 'fist' : newOpen ? 'open' : 'none';
+  prevHandX = palmX; prevHandY = palmY;
+}
+
+function findWinAt(x, y) {
+  for (let i = winEls.length - 1; i >= 0; i--) {
+    const r = winEls[i].getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return winEls[i];
+  }
+  return null;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SPAWN IMAGE (Peace)
+// ══════════════════════════════════════════════════════════════════════════
+let spawnCount = 0;
+function spawnNextImage() {
+  const W = window.innerWidth, H = window.innerHeight;
+  const fileNum = (spawnCount % 10) + 11;
+  const imgFile = `wd_${fileNum}.png`;
+  spawnCount++;
+  const CW   = 340 + Math.floor(Math.random() * 100);
+  const rotZ = (Math.random() - 0.5) * 14;
+  const cx   = 80 + Math.random() * (W - CW - 160);
+  const cy   = 80 + Math.random() * (H - 300);
+  const d = {
+    title: imgFile, img: imgFile, w: CW,
+    cx, cy, x: cx, y: cy,
+    vx: (Math.random() - 0.5) * 0.35,
+    vy: (Math.random() - 0.5) * 0.35,
+    rotZ, zPhase: Math.random() * Math.PI * 2,
+  };
+  const el = document.createElement('div');
+  el.className = 'win intact';
+  el.style.cssText = `width:${CW}px;left:${cx}px;top:${cy}px;z-index:200;`;
+  el.dataset.index = wins.length;
+  el.innerHTML = `<img class="win-img" src="${imgFile}" alt="${imgFile}" draggable="false" crossorigin="anonymous">`;
+  el.style.transform = `translateZ(50px) rotateZ(${rotZ}deg) scale(0)`;
+  el.style.transition = 'transform 0.4s cubic-bezier(0.34,1.56,0.64,1)';
+  world.appendChild(el);
+  d.el = el; wins.push(d); winEls.push(el);
+  pState.push('intact'); pSampled.push(false); pData.push([]);
+  requestAnimationFrame(() => {
+    el.style.transform = `translateZ(50px) rotateZ(${rotZ}deg) scale(1)`;
+    setTimeout(() => el.style.transition = '', 450);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// MEDIAPIPE INIT
+// ══════════════════════════════════════════════════════════════════════════
+async function initMP() {
+  try {
+    const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    handLandmarker = await HandLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate:"GPU" },
+      runningMode:"VIDEO", numHands:1,
+      minHandDetectionConfidence:0.5, minHandPresenceConfidence:0.5, minTrackingConfidence:0.5
+    });
+    await startCam();
+  } catch(e) { console.warn('MP fail', e); setupMouse(); }
+}
+
+async function startCam() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ width:{ideal:1280}, height:{ideal:720} } });
+    bgVideo.srcObject = stream;
+    await new Promise(r => bgVideo.onloadedmetadata = r);
+    camCanvas.width  = bgVideo.videoWidth;
+    camCanvas.height = bgVideo.videoHeight;
+  } catch(e) { console.warn('Cam fail', e); setupMouse(); }
+}
+
+function setupMouse() {
+  cursor.className = 'scanning';
+  document.addEventListener('mousemove', e => {
+    cursor.style.left = e.clientX + 'px'; cursor.style.top = e.clientY + 'px';
+    cursor.classList.remove('scanning');
+    if (grabbedWin) {
+      const nx = e.clientX - grabOffsetX, ny = e.clientY - grabOffsetY;
+      grabbedWin.style.left = nx + 'px'; grabbedWin.style.top = ny + 'px';
+      const idx = parseInt(grabbedWin.dataset.index); wins[idx].cx = nx; wins[idx].cy = ny;
+    }
+  });
+  document.addEventListener('mousedown', e => {
+    cursor.classList.add('pinch');
+    grabbedWin = findWinAt(e.clientX, e.clientY);
+    if (grabbedWin) { grabOffsetX = e.clientX - parseFloat(grabbedWin.style.left); grabOffsetY = e.clientY - parseFloat(grabbedWin.style.top); grabbedWin.classList.add('grabbed'); grabbedWin.style.zIndex = 500; }
+  });
+  document.addEventListener('mouseup', () => {
+    cursor.classList.remove('pinch');
+    if (grabbedWin) { grabbedWin.classList.remove('grabbed'); grabbedWin.style.zIndex = 10; grabbedWin = null; }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'o') wins.forEach((d,i) => { if (pState[i]==='intact') startDissolve(i); });
+    if (e.key === 'r') wins.forEach((_,i) => startReassemble(i));
+    if (e.key === 'c') { constellActive = !constellActive; }
+    if (e.key === 's') { if(!isShuffling) activateShuffle(); else deactivateShuffle(); }
+    if (e.key === 'p') doSpotlight(window.innerWidth/2, window.innerHeight/2);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// MAIN LOOP
+// ══════════════════════════════════════════════════════════════════════════
+function loop() {
+  if (handLandmarker && video.readyState >= 2) {
+    const t = performance.now();
+    if (t !== lastVideoTime) {
+      lastVideoTime = t;
+      const r = handLandmarker.detectForVideo(video, t);
+      detectGestures(r.landmarks);
+      drawHand(r.landmarks);
+    }
+  }
+  floatWindows();
+  updateParticles();
+  drawConstellation();
+  requestAnimationFrame(loop);
+}
+
+createWindows();
+cursor.className = 'scanning';
+updateCursorSVG('default');
+initMP();
+loop();
+</script>
+</body>
+</html>

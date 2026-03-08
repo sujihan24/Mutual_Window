@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particle Flow</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; }
+
+/* ▼ 배경 이미지 여기에 삽입 */
+body {
+  background-image: url('bg_1.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+#canvas {
+  position:fixed; top:0; left:0;
+  width:100%; height:100%; z-index:1;
+}
+
+/* 웹캠 토글 버튼 */
+#cam-btn {
+  position:fixed; bottom:24px; right:24px; z-index:100;
+  width:44px; height:44px; border-radius:50%; border:none; cursor:pointer;
+  background:rgba(0,0,0,0.35);
+  border:1px solid rgba(255,255,255,0.2);
+  backdrop-filter:blur(12px);
+  font-size:18px;
+  transition:background .2s, transform .15s;
+}
+#cam-btn:hover { background:rgba(0,0,0,0.55); transform:scale(1.1); }
+#cam-btn.active { background:rgba(0,180,80,0.3); border-color:rgba(0,255,120,0.4); }
+
+/* 웹캠 미리보기 */
+#cam-preview {
+  position:fixed; bottom:76px; right:24px; z-index:100;
+  width:160px; height:120px; border-radius:12px; overflow:hidden;
+  opacity:0; pointer-events:none;
+  transition:opacity .3s;
+  border:1px solid rgba(255,255,255,0.15);
+}
+#cam-preview.visible { opacity:1; }
+#cam-display { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+#lm-canvas { position:absolute; top:0; left:0; width:100%; height:100%; }
+
+/* 손 커서 */
+.hand-cursor {
+  position:fixed; pointer-events:none; z-index:200;
+  width:22px; height:22px; border-radius:50%;
+  border:2px solid rgba(0,255,160,0.75);
+  box-shadow:0 0 12px rgba(0,255,160,0.5);
+  transform:translate(-50%,-50%);
+  display:none;
+}
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<video id="video-raw" autoplay playsinline muted
+  style="position:absolute;top:-9999px;left:-9999px;width:640px;height:480px;"></video>
+
+<div class="hand-cursor" id="hcur0"></div>
+<div class="hand-cursor" id="hcur1"></div>
+
+<div id="cam-preview">
+  <video id="cam-display" autoplay playsinline muted></video>
+  <canvas id="lm-canvas"></canvas>
+</div>
+
+<button id="cam-btn" onclick="toggleCam()" title="웹캠 켜기/끄기">✋</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1620248257/drawing_utils.js" crossorigin="anonymous"></script>
+
+<script>
+'use strict';
+
+let W = window.innerWidth, H = window.innerHeight;
+
+// ---- RENDERER (투명 배경) ----
+const canvas = document.getElementById('canvas');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, alpha:true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(W, H);
+renderer.setClearColor(0x000000, 0); // 완전 투명
+renderer.autoClear = false;
+
+// ---- SIMPLEX NOISE + CURL ----
+const _grd=[[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+const _prm=(() => {
+  const p=Array.from({length:256},(_,i)=>i);
+  for(let i=255;i>0;i--){const j=0|Math.random()*(i+1);[p[i],p[j]]=[p[j],p[i]];}
+  const q=new Uint8Array(512);for(let i=0;i<512;i++)q[i]=p[i&255];return q;
+})();
+const F2=.5*(Math.sqrt(3)-1), G2=(3-Math.sqrt(3))/6;
+function sn2(xin,yin){
+  const s=(xin+yin)*F2,i=Math.floor(xin+s),j=Math.floor(yin+s);
+  const t=(i+j)*G2,x0=xin-(i-t),y0=yin-(j-t);
+  const[i1,j1]=x0>y0?[1,0]:[0,1];
+  const x1=x0-i1+G2,y1=y0-j1+G2,x2=x0-1+2*G2,y2=y0-1+2*G2;
+  const ii=i&255,jj=j&255;
+  const g0=_grd[_prm[ii+_prm[jj]]%8],g1=_grd[_prm[ii+i1+_prm[jj+j1]]%8],g2=_grd[_prm[ii+1+_prm[jj+1]]%8];
+  let n=0,t0=.5-x0*x0-y0*y0,t1=.5-x1*x1-y1*y1,t2=.5-x2*x2-y2*y2;
+  if(t0>0){t0*=t0;n+=t0*t0*(g0[0]*x0+g0[1]*y0);}
+  if(t1>0){t1*=t1;n+=t1*t1*(g1[0]*x1+g1[1]*y1);}
+  if(t2>0){t2*=t2;n+=t2*t2*(g2[0]*x2+g2[1]*y2);}
+  return 70*n;
+}
+function curl(x,y,t){
+  const e=0.01, s=0.0014;
+  const a=sn2((x+e)*s,y*s+t*.13), b=sn2((x-e)*s,y*s+t*.13);
+  const c=sn2(x*s,(y+e)*s+t*.13), d=sn2(x*s,(y-e)*s+t*.13);
+  return[(c-d)/(2*e), -(a-b)/(2*e)];
+}
+
+// ---- CAMERAS ----
+const oc = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const pc = new THREE.OrthographicCamera(-W/2,W/2,H/2,-H/2,-500,500);
+
+// ---- RENDER TARGETS (ping-pong feedback) ----
+const rto = { minFilter:THREE.LinearFilter, magFilter:THREE.LinearFilter,
+              format:THREE.RGBAFormat, type:THREE.HalfFloatType };
+let rtA = new THREE.WebGLRenderTarget(W,H,rto);
+let rtB = new THREE.WebGLRenderTarget(W,H,rto);
+
+// ---- FEEDBACK SCENE ----
+const fbScene = new THREE.Scene();
+const fbMat = new THREE.ShaderMaterial({
+  uniforms:{ uP:{value:null} },
+  vertexShader:`varying vec2 vU;void main(){vU=uv;gl_Position=vec4(position,1.);}`,
+  fragmentShader:`uniform sampler2D uP;varying vec2 vU;
+    void main(){
+      vec2 c=vec2(.5);
+      vec2 uv=(vU-c)*.9993+c;
+      float a=.00022, s=sin(a), cs=cos(a);
+      mat2 r=mat2(cs,-s,s,cs);
+      uv=r*(uv-c)+c;
+      gl_FragColor=texture2D(uP,uv)*.92;
+    }`,
+});
+fbScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),fbMat));
+
+// ---- PARTICLES ----
+const pScene = new THREE.Scene();
+const N = 7000; // ← 파티클 수 (조절 가능)
+
+const pos = new Float32Array(N*3);
+const vel = new Float32Array(N*2);
+const col = new Float32Array(N*3);
+const sz  = new Float32Array(N);
+const ph  = new Float32Array(N);
+
+for(let i=0;i<N;i++){
+  pos[i*3]   = (Math.random()-.5)*W*1.1;
+  pos[i*3+1] = (Math.random()-.5)*H*1.1;
+  pos[i*3+2] = 0;
+  vel[i*2]   = (Math.random()-.5)*.5;
+  vel[i*2+1] = (Math.random()-.5)*.5;
+  // 색상 팔레트 (원하면 여기서 수정)
+  const r = Math.random();
+  if     (r<.30){col[i*3]=.04; col[i*3+1]=.84+Math.random()*.16; col[i*3+2]=1.;}  // 시안
+  else if(r<.52){col[i*3]=.3+Math.random()*.2; col[i*3+1]=.82; col[i*3+2]=1.;}    // 스카이블루
+  else if(r<.70){col[i*3]=0.;  col[i*3+1]=1.;  col[i*3+2]=.55+Math.random()*.45;} // 민트
+  else if(r<.85){col[i*3]=.15; col[i*3+1]=.6;  col[i*3+2]=1.;}                    // 딥블루
+  else          {col[i*3]=.9;  col[i*3+1]=.96; col[i*3+2]=1.;}                    // 화이트
+  sz[i] = 1.2+Math.random()*4.0;
+  ph[i] = Math.random()*Math.PI*2;
+}
+
+const geo = new THREE.BufferGeometry();
+const posA = new THREE.BufferAttribute(pos,3);
+geo.setAttribute('position', posA);
+geo.setAttribute('aC', new THREE.BufferAttribute(col,3));
+geo.setAttribute('aS', new THREE.BufferAttribute(sz,1));
+geo.setAttribute('aP', new THREE.BufferAttribute(ph,1));
+
+const pMat = new THREE.ShaderMaterial({
+  uniforms:{ uT:{value:0} },
+  vertexShader:`
+    attribute vec3 aC; attribute float aS,aP; uniform float uT; varying vec3 vC;
+    void main(){
+      vC=aC;
+      float pulse=1.+.2*sin(uT*2.6+aP);
+      gl_PointSize=aS*pulse;
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);
+    }`,
+  fragmentShader:`
+    varying vec3 vC;
+    void main(){
+      vec2 uv=gl_PointCoord-.5; float d=length(uv);
+      if(d>.5) discard;
+      float a=1.-smoothstep(0.,.5,d); a=pow(a,1.4);
+      float core=smoothstep(.18,0.,d);
+      gl_FragColor=vec4(vC+core*.4, a*.85);
+    }`,
+  transparent:true, blending:THREE.AdditiveBlending,
+  depthWrite:false, depthTest:false,
+});
+pScene.add(new THREE.Points(geo, pMat));
+
+// ---- DISPLAY SCENE (feedback → screen) ----
+const dispScene = new THREE.Scene();
+const dispMat = new THREE.ShaderMaterial({
+  uniforms:{ uT:{value:null} },
+  vertexShader:`varying vec2 vU;void main(){vU=uv;gl_Position=vec4(position,1.);}`,
+  fragmentShader:`
+    uniform sampler2D uT; varying vec2 vU;
+    void main(){
+      vec3 c=texture2D(uT,vU).rgb;
+      float lum=dot(c,vec3(.299,.587,.114));
+      vec3 bloom=c*max(lum-.1,0.)*2.2;
+      vec3 out_c=c+bloom;
+      // 밝기 기반 alpha → 파티클 없는 어두운 영역은 투명 (배경 이미지 보임)
+      float a=max(out_c.r,max(out_c.g,out_c.b));
+      gl_FragColor=vec4(out_c, a);
+    }`,
+  transparent:true, blending:THREE.AdditiveBlending,
+  depthWrite:false,
+});
+dispScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2,2),dispMat));
+
+// ============================================================
+//  HAND TRACKING
+// ============================================================
+const hands = [
+  { active:false, wx:0, wy:0, vx:0, vy:0, sx:0, sy:0, palm:{x:0,y:0} },
+  { active:false, wx:0, wy:0, vx:0, vy:0, sx:0, sy:0, palm:{x:0,y:0} }
+];
+let ripples = [];
+
+const videoRaw   = document.getElementById('video-raw');
+const camDisplay = document.getElementById('cam-display');
+const camPreview = document.getElementById('cam-preview');
+const lmCanvas   = document.getElementById('lm-canvas');
+const lmCtx      = lmCanvas.getContext('2d');
+const hcurs      = [document.getElementById('hcur0'), document.getElementById('hcur1')];
+const camBtn     = document.getElementById('cam-btn');
+
+let mpHands=null, mpCamera=null, camActive=false;
+
+function onHandResults(results) {
+  lmCtx.clearRect(0,0,lmCanvas.width,lmCanvas.height);
+  hands[0].active = false;
+  hands[1].active = false;
+
+  if(!results.multiHandLandmarks?.length){
+    hcurs[0].style.display='none'; hcurs[1].style.display='none'; return;
+  }
+
+  results.multiHandLandmarks.forEach((lm, hi) => {
+    if(hi>=2) return;
+    const h = hands[hi];
+    h.active = true;
+
+    // 손바닥 중심 (wrist + middle base 평균)
+    const nx = 1-(lm[0].x+lm[9].x)*.5;
+    const ny =   (lm[0].y+lm[9].y)*.5;
+
+    // 스무딩
+    h.sx = h.sx+(nx-h.sx)*.35;
+    h.sy = h.sy+(ny-h.sy)*.35;
+
+    const newWX = (h.sx-.5)*W;
+    const newWY = -(h.sy-.5)*H;
+    h.vx = (newWX-h.wx)*2.8;
+    h.vy = (newWY-h.wy)*2.8;
+    h.wx = newWX; h.wy = newWY;
+    h.palm = {x:h.sx, y:h.sy};
+
+    // 화면 커서
+    hcurs[hi].style.display='block';
+    hcurs[hi].style.left = h.sx*W+'px';
+    hcurs[hi].style.top  = h.sy*H+'px';
+
+    // 빠른 움직임 → 리플
+    const spd = Math.sqrt(h.vx*h.vx+h.vy*h.vy);
+    if(spd>28) ripples.push({x:h.wx,y:h.wy,t:0,str:Math.min(spd/16,5)});
+
+    // 미리보기 스켈레톤
+    drawSkeleton(lm, hi);
+  });
+
+  for(let i=results.multiHandLandmarks.length;i<2;i++) hcurs[i].style.display='none';
+}
+
+function drawSkeleton(lm, hi){
+  const cw=lmCanvas.width, ch=lmCanvas.height;
+  const cl = hi===0?'#00ffaa':'#00ccff';
+  const conn=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],
+    [0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],
+    [0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+  lmCtx.strokeStyle=cl; lmCtx.lineWidth=1; lmCtx.globalAlpha=.5;
+  conn.forEach(([a,b])=>{
+    lmCtx.beginPath();
+    lmCtx.moveTo((1-lm[a].x)*cw, lm[a].y*ch);
+    lmCtx.lineTo((1-lm[b].x)*cw, lm[b].y*ch);
+    lmCtx.stroke();
+  });
+  [0,4,8,12,16,20].forEach(id=>{
+    lmCtx.beginPath();
+    lmCtx.arc((1-lm[id].x)*cw, lm[id].y*ch, 2.5,0,Math.PI*2);
+    lmCtx.fillStyle=cl; lmCtx.globalAlpha=.9; lmCtx.fill();
+  });
+  lmCtx.globalAlpha=1;
+}
+
+async function startCam(){
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'},audio:false});
+    videoRaw.srcObject = stream;
+    camDisplay.srcObject = stream;
+    camPreview.classList.add('visible');
+    lmCanvas.width  = camPreview.offsetWidth;
+    lmCanvas.height = camPreview.offsetHeight;
+
+    mpHands = new Hands({ locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${f}` });
+    mpHands.setOptions({ maxNumHands:2, modelComplexity:1, minDetectionConfidence:.65, minTrackingConfidence:.55 });
+    mpHands.onResults(onHandResults);
+
+    mpCamera = new Camera(videoRaw, {
+      onFrame: async()=>{ await mpHands.send({image:videoRaw}); },
+      width:640, height:480
+    });
+    await mpCamera.start();
+
+    camActive=true;
+    camBtn.classList.add('active');
+    camBtn.textContent='🖐';
+  } catch(e){ console.error(e); alert('카메라 접근 실패: '+e.message); }
+}
+
+function stopCam(){
+  if(mpCamera){ mpCamera.stop(); mpCamera=null; }
+  if(mpHands){ mpHands.close(); mpHands=null; }
+  if(videoRaw.srcObject) videoRaw.srcObject.getTracks().forEach(t=>t.stop());
+  videoRaw.srcObject = camDisplay.srcObject = null;
+  camPreview.classList.remove('visible');
+  camActive=false;
+  camBtn.classList.remove('active');
+  camBtn.textContent='✋';
+  hands[0].active=false; hands[1].active=false;
+  hcurs[0].style.display='none'; hcurs[1].style.display='none';
+}
+
+function toggleCam(){ camActive ? stopCam() : startCam(); }
+window.toggleCam = toggleCam;
+
+// ---- 마우스 폴백 ----
+let mwx=0, mwy=0;
+document.addEventListener('mousemove',e=>{
+  mwx=e.clientX-W*.5; mwy=-(e.clientY-H*.5);
+});
+document.addEventListener('click',e=>{
+  ripples.push({x:e.clientX-W*.5,y:-(e.clientY-H*.5),t:0,str:3});
+});
+
+// ---- RESIZE ----
+window.addEventListener('resize',()=>{
+  W=window.innerWidth; H=window.innerHeight;
+  renderer.setSize(W,H);
+  pc.left=-W/2; pc.right=W/2; pc.top=H/2; pc.bottom=-H/2; pc.updateProjectionMatrix();
+  rtA.setSize(W,H); rtB.setSize(W,H);
+  if(camActive){ lmCanvas.width=camPreview.offsetWidth; lmCanvas.height=camPreview.offsetHeight; }
+});
+
+// ============================================================
+//  ANIMATION LOOP
+// ============================================================
+const clock = new THREE.Clock();
+let time = 0;
+
+function tick(){
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), .05);
+  time += dt;
+  pMat.uniforms.uT.value = time;
+
+  // ---- 파티클 업데이트 ----
+  for(let i=0;i<N;i++){
+    let px=pos[i*3], py=pos[i*3+1];
+
+    // Curl Noise 흐름
+    const [cx,cy] = curl(px,py,time*.65);
+    vel[i*2]   += cx*55*dt;
+    vel[i*2+1] += cy*55*dt;
+
+    // 마우스 (웹캠 꺼짐 시)
+    if(!camActive){
+      const dx=mwx-px,dy=mwy-py,d2=dx*dx+dy*dy;
+      if(d2<185*185&&d2>1){ const d=Math.sqrt(d2),f=(1-d/185)*.9;
+        vel[i*2]+=(dx/d)*f; vel[i*2+1]+=(dy/d)*f; }
+    }
+
+    // 손 영향
+    for(const h of hands){
+      if(!h.active) continue;
+      const dx=h.wx-px, dy=h.wy-py, d=Math.sqrt(dx*dx+dy*dy);
+      if(d<260&&d>1){
+        const fo=1-d/260;
+        // 흡인
+        vel[i*2]  +=(dx/d)*fo*.8;
+        vel[i*2+1]+=(dy/d)*fo*.8;
+        // 방향성 밀기
+        const hs=Math.sqrt(h.vx*h.vx+h.vy*h.vy);
+        if(hs>.5){ const p=fo*Math.min(hs*.09,5);
+          vel[i*2]+=(h.vx/hs)*p; vel[i*2+1]+=(h.vy/hs)*p; }
+        // 소용돌이
+        const sw=fo*.16;
+        vel[i*2]  +=-(dy/d)*sw*Math.sign(h.vx+.001);
+        vel[i*2+1]+= (dx/d)*sw*Math.sign(h.vy+.001);
+      }
+    }
+
+    // 리플
+    for(const r of ripples){
+      const rx=px-r.x,ry=py-r.y,rd=Math.sqrt(rx*rx+ry*ry);
+      const rR=r.t*3+18,rW=48;
+      if(rd>0&&Math.abs(rd-rR)<rW){
+        const f=(1-Math.abs(rd-rR)/rW)*Math.max(1-r.t*.013,0)*(r.str||3)*1.5;
+        vel[i*2]+=(rx/rd)*f; vel[i*2+1]+=(ry/rd)*f;
+      }
+    }
+
+    vel[i*2]*=.972; vel[i*2+1]*=.972;
+    pos[i*3]  +=vel[i*2];   pos[i*3+1]+=vel[i*2+1];
+
+    const hw=W*.56,hh=H*.56;
+    if(pos[i*3]   > hw) pos[i*3]  =-hw;
+    if(pos[i*3]   <-hw) pos[i*3]  = hw;
+    if(pos[i*3+1] > hh) pos[i*3+1]=-hh;
+    if(pos[i*3+1] <-hh) pos[i*3+1]= hh;
+  }
+  posA.needsUpdate=true;
+  for(const r of ripples) r.t++;
+  ripples=ripples.filter(r=>r.t<85);
+
+  // ---- 렌더 파이프라인 ----
+  // 1. Feedback (이전 프레임 잔상)
+  renderer.setRenderTarget(rtB);
+  renderer.clear();
+  fbMat.uniforms.uP.value = rtA.texture;
+  renderer.render(fbScene, oc);
+
+  // 2. 파티클 추가 (additive, clear 없음)
+  renderer.render(pScene, pc);
+
+  // 3. 화면 출력 (uniform 먼저 설정 후 한 번만 렌더)
+  dispMat.uniforms.uT.value = rtB.texture;
+  renderer.setRenderTarget(null);
+  renderer.clear();
+  renderer.render(dispScene, oc);
+
+  // 4. ping-pong
+  const tmp=rtA; rtA=rtB; rtB=tmp;
+}
+
+tick();
+</script>
+</body>
+</html>
