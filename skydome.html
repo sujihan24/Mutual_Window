@@ -107,9 +107,65 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
 #cursor.open     { width:120px; height:120px; }
 #cursor.fist     { width:108px; height:108px; }
 
-/* ═══════════════════════════════════════════════
-   TUTORIAL OVERLAY
-   ═══════════════════════════════════════════════ */
+/* ── BACK BUTTON ────────────────────────────────────────── */
+#back-btn {
+  position: fixed;
+  top: 0px;
+  left: 0px;
+  z-index: 10000;
+  width: 120px;
+  height: 120px;
+  opacity: 0.85;
+  transition: opacity 0.2s, transform 0.2s;
+  cursor: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#back-btn:hover { opacity: 1; }
+#back-btn img {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+
+/* Circular progress ring around back button */
+#back-progress-ring {
+  position: fixed;
+  top: 33px;
+  left: 33px;
+  width: 54px;
+  height: 54px;
+  z-index: 10001;
+  pointer-events: none;
+  transform: rotate(-90deg);
+}
+#back-progress-ring circle.track {
+  fill: none;
+  stroke: rgba(255,255,255,0.12);
+  stroke-width: 3;
+}
+#back-progress-ring circle.progress {
+  fill: none;
+  stroke: rgba(80, 200, 255, 0.95);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 0 999;
+  transition: stroke-dasharray 0.05s linear;
+  filter: drop-shadow(0 0 4px rgba(80,200,255,0.8));
+}
+
+/* Glow when hovering back button */
+#back-btn.hovered {
+  opacity: 1;
+  transform: scale(1.1);
+  filter: drop-shadow(0 0 10px rgba(80,200,255,0.7));
+}
+
+/* ── TUTORIAL OVERLAY ─────────────────────────────── */
 #tutorial-overlay {
   position: fixed;
   inset: 0;
@@ -129,7 +185,6 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   pointer-events: none;
 }
 
-/* Animated scan line on overlay */
 #tutorial-overlay::before {
   content: '';
   position: absolute;
@@ -149,7 +204,6 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   100% { background-position: 0 100px; }
 }
 
-/* Radial glow behind card */
 #tutorial-overlay::after {
   content: '';
   position: absolute;
@@ -160,7 +214,6 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   pointer-events: none;
 }
 
-/* Win7 window wrapper — glassmorphism */
 #tutorial-card {
   position: relative;
   z-index: 1;
@@ -184,7 +237,6 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   to   { opacity: 1; transform: scale(1); }
 }
 
-/* Win7 title bar — glass tint */
 #tutorial-card::before {
   content: 'Gesture Space';
   position: absolute;
@@ -214,11 +266,6 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   z-index: 2;
 }
 
-
-
-
-
-/* Content body below title bar */
 .card-body {
   padding: 64px 60px 52px;
   background: transparent;
@@ -230,7 +277,6 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Gesture grid */
 .gesture-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -308,14 +354,12 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   line-height: 1.45;
 }
 
-/* Accent dot per gesture */
 .gesture-item:nth-child(1) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(80, 200, 255, 0.12); }
 .gesture-item:nth-child(2) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(255, 210, 50, 0.12); }
 .gesture-item:nth-child(3) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(60, 220, 120, 0.12); }
 .gesture-item:nth-child(4) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(180, 50, 255, 0.12); }
 .gesture-item:nth-child(5) .gesture-icon-wrap { box-shadow: 0 0 18px rgba(255, 100, 50, 0.12); }
 
-/* Win7-style divider */
 .tutorial-divider {
   width: 100%;
   height: 1px;
@@ -330,7 +374,6 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   box-shadow: 0 1px 0 rgba(0,0,0,0.2);
 }
 
-/* Start button — Windows 7 Aero */
 .tutorial-footer {
   display: flex;
   align-items: center;
@@ -347,8 +390,6 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   cursor: pointer;
   outline: none;
   overflow: hidden;
-
-  /* Aero glass layered background */
   background:
     linear-gradient(180deg,
       rgba(255,255,255,0.28) 0%,
@@ -362,15 +403,12 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
       rgba(30,84,165,1)  50%,
       rgba(50,112,196,1) 100%
     );
-
-  /* Aero outer glow + inset rim */
   box-shadow:
     0 0 0 1px rgba(14, 52, 120, 0.95),
     0 0 0 2px rgba(108, 168, 230, 0.5),
     inset 0 1px 0 rgba(255,255,255,0.35),
     0 2px 6px rgba(0,0,0,0.4),
     0 1px 2px rgba(0,0,0,0.3);
-
   transition: filter 0.1s, box-shadow 0.1s;
 }
 
@@ -382,7 +420,6 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
 }
 
-/* Top gloss shine */
 #start-btn::before {
   content: '';
   position: absolute;
@@ -416,36 +453,21 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   transform: translateY(1px);
 }
 
-#back-btn {
-  position: fixed;
-  top: 20px;
-  left: 20px;
-  z-index: 100;
-  width: 44px;
-  height: 44px;
-  opacity: 0.85;
-  transition: opacity 0.2s, transform 0.2s;
-}
-#back-btn:hover {
-  opacity: 1;
-  transform: scale(1.08);
-}
-#back-btn img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-
-/* Remove old pulse ring */
 #start-btn::after { display: none; }
 </style>
 </head>
 <body>
 
-  <a id="back-btn" href="iconlayout.html">
-    <img src="backbutton.png">
-  </a>
+<!-- ── BACK BUTTON ─────────────────────────────────────────── -->
+<div id="back-btn">
+  <img src="backbutton.png" alt="back">
+</div>
+
+<!-- Circular progress ring (rendered over back button) -->
+<svg id="back-progress-ring" viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
+  <circle class="track"    cx="27" cy="27" r="24"/>
+  <circle class="progress" cx="27" cy="27" r="24" id="back-ring-progress"/>
+</svg>
 
 <!-- ── TUTORIAL OVERLAY ─────────────────────────────── -->
 <div id="tutorial-overlay">
@@ -502,7 +524,7 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
   </div>
 </div>
 
-<!-- ── MAIN SCENE ───────────────────────────────────── -->
+<!-- ── MAIN SCENE ───────────────────────────────────────────── -->
 <div id="bg-video-wrap">
   <video id="bgVideo" playsinline autoplay muted></video>
   <div id="bg-overlay"></div>
@@ -539,7 +561,6 @@ function closeTutorial() {
 }
 
 startBtn.addEventListener('click', closeTutorial);
-// Also close on Enter key
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter') closeTutorial();
 });
@@ -558,6 +579,53 @@ const pCanvas     = document.getElementById('particle-canvas');
 const pCtx        = pCanvas.getContext('2d');
 const cCanvas     = document.getElementById('constellation-canvas');
 const cCtx        = cCanvas.getContext('2d');
+
+// ── Back button hover detection ─────────────────────────────────────────
+const backBtn         = document.getElementById('back-btn');
+const backRingEl      = document.getElementById('back-ring-progress');
+const BACK_HOLD_MS    = 1500;   // 1.5초 유지하면 이동
+const BACK_CIRCUMF    = 2 * Math.PI * 24; // r=24 → circumference ≈ 150.8
+
+let backHoverStart  = null;   // hover 시작 타임스탬프
+let backProgress    = 0;      // 0 ~ 1
+let backTriggered   = false;
+
+function getBackBtnRect() {
+  return backBtn.getBoundingClientRect();
+}
+
+function isOverBackBtn(x, y) {
+  return x >= 0 && x <= 120 && y >= 0 && y <= 120;
+}
+
+function updateBackButton(hx, hy) {
+  if (backTriggered) return;
+
+  const over = isOverBackBtn(hx, hy);
+
+  if (over) {
+    if (backHoverStart === null) backHoverStart = performance.now();
+    const elapsed = performance.now() - backHoverStart;
+    backProgress  = Math.min(elapsed / BACK_HOLD_MS, 1);
+    backBtn.classList.add('hovered');
+
+    // SVG ring: stroke-dasharray = filled, gap
+    const filled = backProgress * BACK_CIRCUMF;
+    backRingEl.style.strokeDasharray = `${filled} ${BACK_CIRCUMF}`;
+
+    if (backProgress >= 1) {
+      backTriggered = true;
+      // 짧은 flash 후 이동
+      backBtn.style.filter = 'brightness(2) drop-shadow(0 0 20px rgba(80,200,255,1))';
+      setTimeout(() => { window.location.href = 'index.html'; }, 300);
+    }
+  } else {
+    backHoverStart = null;
+    backProgress   = 0;
+    backBtn.classList.remove('hovered');
+    backRingEl.style.strokeDasharray = `0 ${BACK_CIRCUMF}`;
+  }
+}
 
 // ── Core state ───────────────────────────────────────────────────────────
 let handLandmarker, lastVideoTime = -1;
@@ -955,6 +1023,8 @@ function detectGestures(lms) {
     wins.forEach((_, i) => { if (pState[i] === 'dissolved' || pState[i] === 'dissolving') startReassemble(i); });
     if (isShuffling) deactivateShuffle();
     constellActive = false;
+    // Reset back button when hand disappears
+    updateBackButton(-9999, -9999);
     return;
   }
 
@@ -973,6 +1043,9 @@ function detectGestures(lms) {
   }
   cursor.style.left = px + 'px';
   cursor.style.top  = py + 'px';
+
+  // ── Back button hover check (항상 실행) ──────────────────────────────
+  updateBackButton(px, py);
 
   const indexExt  = lm[8].y  < lm[6].y  - 0.02;
   const middleExt = lm[12].y < lm[10].y - 0.02;
@@ -1037,9 +1110,17 @@ function detectGestures(lms) {
   }
 
   if (isPoint) {
-    cursor.className = 'pointing'; updateCursorSVG('pointing');
-    closeTutorial();
-    doSpotlight(px, py);
+  cursor.className = 'pointing'; updateCursorSVG('pointing');
+  closeTutorial();
+  doSpotlight(px, py);
+
+  // 백버튼 영역 위에서 포인팅하면 이동
+  const backBtn = document.getElementById('back-btn');
+  const r = backBtn.getBoundingClientRect();
+  if (px >= r.left && px <= r.right && py >= r.top && py <= r.bottom) {
+    window.location.href = 'iconlayout.html';
+  }
+
   } else if (!newOpen && !newFist && !newPinch && !isPeace) {
     clearSpotlight();
   }
@@ -1102,6 +1183,7 @@ function spawnNextImage() {
 // MEDIAPIPE INIT
 // ══════════════════════════════════════════════════════════════════════════
 async function initMP() {
+  setupMouse(); // 항상 마우스 활성화
   try {
     const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
     handLandmarker = await HandLandmarker.createFromOptions(vision, {
@@ -1110,7 +1192,7 @@ async function initMP() {
       minHandDetectionConfidence:0.5, minHandPresenceConfidence:0.5, minTrackingConfidence:0.5
     });
     await startCam();
-  } catch(e) { console.warn('MP fail', e); setupMouse(); }
+  } catch(e) { console.warn('MP fail', e); }
 }
 
 async function startCam() {
@@ -1120,14 +1202,14 @@ async function startCam() {
     await new Promise(r => bgVideo.onloadedmetadata = r);
     camCanvas.width  = bgVideo.videoWidth;
     camCanvas.height = bgVideo.videoHeight;
-  } catch(e) { console.warn('Cam fail', e); setupMouse(); }
+  } catch(e) { console.warn('Cam fail', e); }
 }
 
 function setupMouse() {
-  cursor.className = 'scanning';
   document.addEventListener('mousemove', e => {
     cursor.style.left = e.clientX + 'px'; cursor.style.top = e.clientY + 'px';
     cursor.classList.remove('scanning');
+    updateBackButton(e.clientX, e.clientY);
     if (grabbedWin) {
       const nx = e.clientX - grabOffsetX, ny = e.clientY - grabOffsetY;
       grabbedWin.style.left = nx + 'px'; grabbedWin.style.top = ny + 'px';
@@ -1135,6 +1217,11 @@ function setupMouse() {
     }
   });
   document.addEventListener('mousedown', e => {
+    // 백버튼 클릭 체크
+    if (isOverBackBtn(e.clientX, e.clientY)) {
+      window.location.href = 'iconlayout.html';
+      return;
+    }
     cursor.classList.add('pinch');
     grabbedWin = findWinAt(e.clientX, e.clientY);
     if (grabbedWin) { grabOffsetX = e.clientX - parseFloat(grabbedWin.style.left); grabOffsetY = e.clientY - parseFloat(grabbedWin.style.top); grabbedWin.classList.add('grabbed'); grabbedWin.style.zIndex = 500; }
