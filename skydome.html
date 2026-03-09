@@ -124,8 +124,8 @@ body { font-family: 'Courier New', Courier, monospace; overflow: hidden; width: 
 }
 #back-btn:hover { opacity: 1; }
 #back-btn img {
-  width: 54px;
-  height: 54px;
+  width: 72px;
+  height: 72px;
   object-fit: contain;
   display: block;
   position: relative;
@@ -1118,7 +1118,7 @@ function detectGestures(lms) {
   const backBtn = document.getElementById('back-btn');
   const r = backBtn.getBoundingClientRect();
   if (px >= r.left && px <= r.right && py >= r.top && py <= r.bottom) {
-    window.location.href = 'iconlayout.html';
+    window.location.href = 'index.html';
   }
 
   } else if (!newOpen && !newFist && !newPinch && !isPeace) {
@@ -1219,7 +1219,7 @@ function setupMouse() {
   document.addEventListener('mousedown', e => {
     // 백버튼 클릭 체크
     if (isOverBackBtn(e.clientX, e.clientY)) {
-      window.location.href = 'iconlayout.html';
+      window.location.href = 'index.html';
       return;
     }
     cursor.classList.add('pinch');
